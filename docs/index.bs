@@ -1,0 +1,373 @@
+<pre class='metadata'>
+Title: KDBX4
+Shortname: KDBX4
+Level: 1
+Status: DREAM
+Repository: https://github.com/r4gus/kdbx
+URL: https://r4gus.github.io/kdbx/index.html
+Editor: David P. Sugar, david@thesugar.de
+Abstract: This document describes the KDBX4 password database format as used by applications like KeePass and KeePassXC. 
+Complain About: accidental-2119 yes, missing-example-ids yes
+Markup Shorthands: markdown yes, css no
+</pre>
+
+Introduction {#intro}
+=====================
+
+The problem of storing secrets securely is an important part of credential management; unfortunately, most password managers and other applications managing secrets implement their own, and some times proprietary, credential database scheme.
+
+This document is an unofficial specification of the KDBX4 password database format as used by applications like KeePass and KeePassXC.
+
+KDBX4 is a two layered password database, stored within a single file. It consists of a encrypted body, as well as a header that contains all necessary information to decrypt the body. All data is stored within a [[!XML]] data structure. KDBX4 also offers the possibility to obfuscate specific values within the XML structure using a stream cipher. While this is applied in practice, we the authors of this document want to emphasize that the overall security benefit is questionable at most, i.e., even with obfuscated fields one must assume the same security level as if obfuscation wouldn't have been applied.
+
+## Conventions ## {#conventions}
+
+: Endianness
+:: All numbers are stored in the little-endian format, e.g., the `u32` number 0x12345678 is stored as `78 56 34 12` consecutively in memory.
+
+: Unsigned numbers
+:: Unsigned numbers are represented as `uN`, a number in the range `[0, 2^n - 1]`, e.g., `u32` is a number between 0 and 4294967295.
+
+: Byte sequence
+:: A byte sequence is denoted as `byte[N]` where `N` is the number of consecutive bytes in memory.
+
+: UUID
+:: Certain elements like ciphers and key derivation functions are encoded as Universally Unique IDentifiers [[RFC4122]]. In the context of KDBX4, a UUID is treated as a u128 and encoded in little-endian format.
+
+: URN
+:: The human readable encoding of a UUID. In the context of CBOR this is encoded as a tstr.
+
+: String
+:: A UTF-8 string.
+
+General File Structure {#file-structure}
+=====================
+
+A KDBX4 file consists of a Outer Header followed by an encrypted Body. The decrypted Body itself consists of a Inner Header followed by a XML data structure that represents the actual database.
+
+<pre>
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Outer Header | Inner Header |           XML Data              |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+
+## Header
+
+KDBX4 uses headers to tag data, like the encrypted body, with additional information required to interpret and use the data correctly. Overall, KDBX4 distinguishes between two types of headers: [[#outer-header]] and [[#inner-header]]. Both types of headers share mostly the same data structure, a linear list of [[#header-field]]s.
+
+### Header Field ### {#header-field}
+
+The [[#outer-header]] as well as the [[#inner-header]] consist of one or more Header Fields. All Header Fields share a common format.
+
+<pre>
+                        1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 0 |   Field Type  |                   Size                        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ 4 |     Size      |             Data (variable)                 ...
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   ...        .../
+   +-+-+-+-+-+-+/
+</pre>
+
+The fields have to following meaning:
+
+- Field Type (8 bits): a unique unsigned value that identifies the Field. The actual meaning of the value is determined by the header type. For the Outer Header, the meaning is defined by the [=Outer Header Field Types=].
+- Size (32 bits): an unsigned value giving the total size of the Data.
+- Data (byte[Size]): the content of the field. The Field Type defines how the data is to be interpreted.
+
+The general Header Field structure allows the encoding of a variety of values and makes them easy to process.
+
+### Variant Map ### {#variant-map}
+
+A Variant Map allows the consecutive storage of an arbitrary number of key-value pairs. A Variant Map starts with a version, followed by one or more key-value pairs. The Variant Map is terminated by a single 0x00 (zero) byte.
+
+<pre>
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Version | Entry | Entry | ... | Entry | 0x00  |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+
+The version is encoded as a u16. The least significant byte MUST be ignored while the most significant byte MUST be the value 0x01, i.e., the values 0x0100 and 0x0123 are acceptable but 0x0200 is an invalid version number.
+
+All Variant Map Entries share the same format:
+
+<pre>
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Type | KeySize | Key | ValueSize | Value  |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+
+- Type (u8): The type of the value. It determines how the entry should be interpreted (see [=Entry Type=]s).
+- KeySize (u32): Size of the Key in bytes.
+- Key (byte[KeySize]): A string of length KeySize.
+- ValueSize (u32): Size of the Value in bytes.
+- Value (byte[ValueSize]): A octet string of length ValueSize. How the value should be interpreted is determined by Type.
+
+<table class="complex data">
+    <caption>
+        Variant Map <dfn>Entry Type</dfn>s
+    </caption>
+    <thead>
+        <tr>
+            <th>Type</th>
+            <th>Mapping</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>0x04</td>
+            <td>u32</td>
+        </tr>
+        <tr>
+            <td>0x05</td>
+            <td>u64</td>
+        </tr>
+        <tr>
+            <td>0x08</td>
+            <td>
+                bool (1 byte)
+                
+                - 0x00: false
+                - 0x01..0xff: true
+            </td>
+        </tr>
+        <tr>
+            <td>0x0c</td>
+            <td>i32</td>
+        </tr>
+        <tr>
+            <td>0x0d</td>
+            <td>i64</td>
+        </tr>
+        <tr>
+            <td>0x18</td>
+            <td>UTF-8 string</td>
+        </tr>
+        <tr>
+            <td>0x42</td>
+            <td>Byte slice</td>
+        </tr>
+    </tbody>
+</table>
+
+Note: The expected size of the [=Entry Type=] (in bytes) MUST match the ValueSize.
+
+### Outer Header ### {#outer-header}
+
+The Outer Header consists of the database version followed by one ore more [[#header-field]]s. After the Outer Header follows a SHA-256 hash of the Outer Header and HMAC-SHA-256 message authentication code (MAC) digest.
+
+The hash MAY be checked before parsing the whole Outer Header to verify the integrity of the header. The MAC digest must be verified after parsing the Outer Header and before the body is decrypted to ensure the integrity and authenticity of the header.
+
+<pre>
+|--                       Outer Header                    --|
+|                                                           |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+| Sig1 | Sig2 | VMinor | VMajor | Field | Field | ... | EOH | Hash | Mac | Data ... /
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+</pre>
+
+The version SHOULD be used to determine, if a implementation supports the given file format.
+
+<table class="complex data">
+    <caption>
+        KDBX4 version definitions
+    </caption>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Data Type</th>
+            <th>Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><dfn>Sig1</dfn></td>
+            <td>u32</td>
+            <td>
+                The magic number 0x9AA2D903 shared by all KDBX versions.
+            </td>
+        </tr>
+        <tr>
+            <td><dfn>Sig2</dfn></td>
+            <td>u32</td>
+            <td>
+                A magic number unique to each major KDBX version. The number for KDBX4 is 0xB54BFB67.
+            </td>
+        </tr>
+        <tr>
+            <td><dfn>VMinor</dfn></td>
+            <td>u16</td>
+            <td>
+                The minor version number of the database.
+            </td>
+        </tr>
+        <tr>
+            <td><dfn>VMajor</dfn></td>
+            <td>u16</td>
+            <td>
+                The major version number of the database. For KDBX4 this number is always 4.
+            </td>
+        </tr>
+    </tbody>
+</table>
+
+Implementations of KDBX4 MUST support [=VMajor=] version 4. 
+
+When changing or extending the file format: if the new format can not be read by old implementations, [=VMinor=] must be incremented. Developers MUST ensure that code that reads the new format is also capable of reading the old format without checking [=VMinor=]. The definition of an additional header field would be such a change.
+
+The version is followed by one or more header fields. The following fields are supported for the Outer Header:
+
+<table class="complex data">
+    <caption>
+        <dfn>Outer Header Field Types</dfn>
+    </caption>
+    <thead>
+        <tr>
+            <th>Field Type</th>
+            <th>Data Type</th>
+            <th>Description</th>
+            <th>Required?</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><dfn>EndOfOuterHeader</dfn> (0x00)</td>
+            <td></td>
+            <td>
+                This field marks the last field of the outer header. The data is expected to consists of the following four octets: `0d0a0d0a`.
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>CipherID</dfn> (0x02)</td>
+            <td>UUID</td>
+            <td>
+                The cipher used for encryption. This is a UUID that references one of the allowed [=Ciphers=].
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>Compression</dfn> (0x03)</td>
+            <td>u32</td>
+            <td>
+                The following compression algorithms are supported:
+
+                None: 0x00000000
+
+                GZip: 0x00000001
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>MainSeed</dfn> (0x04)</td>
+            <td>byte[32]</td>
+            <td>
+                32 octets that are used for the key derivation.
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>EncryptionIV</dfn> (0x07)</td>
+            <td>byte[]</td>
+            <td>
+                The initialization vector (also known as Nonce) used for the cipher. The size of this field depends on the used cipher, defined by [=CipherID=].
+
+                - AES256-CBC: byte[16]
+                - Twofish-CBC: byte[16]
+                - ChaCha20: byte[12]
+
+                Note: The IV MUST NOT be reused.
+
+                Note: When using ChaCha20 the developer MUST NOT choose the initialization vector at random.
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>KdfParameters</dfn> (0x0b)</td>
+            <td>[[#variant-map]]</td>
+            <td>
+                The parameters required for the selected key derivation function (KDF).
+            </td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><dfn>PublicCustomData</dfn> (0x0c)</td>
+            <td>[[#variant-map]]</td>
+            <td>
+                Arbitrary data. 
+
+                Note: The data is not encrypted. Developers SHOULD encrypt sensitive data "of premise" before storing it within this field.
+            </td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+All fields labeled as required MUST be present. The absence of such a field indicates a malformed header. A specific field type MUST NOT occur more than once. Duplicate header fields indicate an malformed header. When detecting a malformed header, the application should terminate immediately.
+
+<table class="complex data">
+    <caption>
+        <dfn>Ciphers</dfn> supported by KDBX4
+    </caption>
+    <thead>
+        <tr>
+            <th>Cipher</th>
+            <th>URN</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><dfn>AES128-CBC</dfn></td>
+            <td>61ab05a1-9464-41c3-8d74-3a563df8dd35</td>
+        </tr>
+        <tr>
+            <td><dfn>AES256-CBC</dfn></td>
+            <td>31c1f2e6-bf71-4350-be58-05216afc5aff</td>
+        </tr>
+        <tr>
+            <td><dfn>Twofish-CBC</dfn></td>
+            <td>ad68f29f-576f-4bb9-a36a-d47af965346c</td>
+        </tr>
+        <tr>
+            <td><dfn>ChaCha20</dfn></td>
+            <td>d6038a2b-8b6f-4cb5-a524-339a31dbb59a</td>
+        </tr>
+    </tbody>
+</table>
+
+Note: The cipher [=AES128-CBC=] is deprecated and SHOULD NOT be used. Developers MUST NOT expect that other implementations support this cipher.
+
+### Inner Header ### {#inner-header}
+
+## Key Derivation ## {#kdf}
+
+To en-/decrypt a KDBX4 database, two keys are required: a encryption key and a master MAC key. Both keys are derived from one or more sources of key data:
+
+- Password
+- [[#key-file]]
+- [[#key-provider]]
+
+The encryption key is used to en-/decrypt the database body while the master mac key is used to verify the integrity of the data.
+
+To derive both keys, the following steps must be followed:
+
+1. Gather key material: A composite key is calculated from the given key sources. If more than one source is used, the key material is concatenated in the following order: `keyMaterial = SHA-256(Password) || KeyFileData || KeyProviderData`, e.g., if only a password is used, the keyMaterial equals the SHA-256 digest of the password.
+2. Compute the composite key: `compositeKey = SHA-256(keyMaterial)`.
+3. Derive a master key from the composite key: `k = KDF(compositeKey)`. The KDF and its parameters are defined by the [=KdfParameters=] field.
+4. Derive the encryption and master MAC key from the master key:
+    - `ek = SHA-256(MainSeed || k)`
+    - `mk = SHA-256(MainSeed || k || 0x01)`
+
+### Key File ### {#key-file}
+
+### Key Provider ### {#key-provider}
+
+## Body ## {#body}
+
+The Body has two different stages: it is either a [[#encrypted-body]] or a [[#decrypted-body]].
+
+### Encrypted Body ### {#encrypted-body}
+
+### Decrypted Body ### {#decrypted-body}
