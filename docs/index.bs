@@ -366,7 +366,7 @@ To derive both keys, the following steps must be followed:
 
 ## Body ## {#body}
 
-The Body has two different stages: it is either a [[#encrypted-body]] or a [[#decrypted-body]].
+The Body has two different stages: it is either a [[#encrypted-body]] or a [[#decrypted-body]]. The body is encrypted when stored at rest and just decrypted to access credentials. 
 
 ### Encrypted Body ### {#encrypted-body}
 
