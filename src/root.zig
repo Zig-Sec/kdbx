@@ -2,11 +2,14 @@ const std = @import("std");
 const dishwasher = @import("dishwasher");
 const Uuid = @import("uuid");
 const ChaCha20 = @import("chacha.zig").ChaCha20;
+const xml = @import("xml.zig");
 
 const Allocator = std.mem.Allocator;
 
 // Why not just use fucking EPOCH
 const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
+
+const XML_INDENT = 2;
 
 // +--------------------------------------------------+
 // |Header: Unencrypted                               |
@@ -393,7 +396,7 @@ pub const Body = struct {
     }
 
     pub fn getXml(self: *const @This(), allocator: Allocator) !XML {
-        return try @import("xml.zig").parseXml(self, allocator);
+        return try xml.parseXml(self, allocator);
     }
 };
 
@@ -490,12 +493,53 @@ pub const Icon = struct {
 pub const KeyValue = struct {
     key: []u8,
     value: []u8,
+    protected: bool = false,
 
     pub fn deinit(self: *const @This(), allocator: Allocator) void {
         std.crypto.utils.secureZero(u8, self.key);
         std.crypto.utils.secureZero(u8, self.value);
         allocator.free(self.key);
         allocator.free(self.value);
+    }
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        allocator: Allocator,
+        cipher: *ChaCha20,
+    ) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<String>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Key>");
+        try out.writeAll(self.key);
+        try out.writeAll("</Key>\n");
+
+        if (self.value.len > 0) {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            if (self.protected) {
+                try out.writeAll("<Value Protected=\"True\">");
+                const m = try allocator.dupe(u8, self.value);
+                defer {
+                    std.crypto.utils.secureZero(u8, m);
+                    allocator.free(m);
+                }
+                cipher.xor(m);
+                try xml.writeBase64(out, m, allocator);
+            } else {
+                try out.writeAll("<Value>");
+                try out.print("{s}", .{self.value});
+            }
+            try out.writeAll("</Value>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<Value/>\n");
+        }
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</String>\n");
     }
 };
 
@@ -551,6 +595,7 @@ pub const Entry = struct {
     tags: ?[]u8 = null,
     times: Times,
     strings: std.ArrayList(KeyValue),
+    // TODO: Binary
     auto_type: ?AutoType = null,
     history: ?std.ArrayList(Entry) = null,
     allocator: Allocator,
@@ -560,6 +605,78 @@ pub const Entry = struct {
             if (std.mem.eql(u8, key, kv.key)) return kv.value;
         }
         return null;
+    }
+
+    pub fn toXml(self: *const @This(), out: anytype, level: usize, cipher: *ChaCha20) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Entry>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<UUID>");
+        try xml.writeUuid(out, self.uuid, self.allocator);
+        try out.writeAll("</UUID>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<IconID>");
+        try out.print("{d}", .{self.icon_id});
+        try out.writeAll("</IconID>\n");
+
+        // TODO
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ForegroundColor/>\n");
+
+        // TODO
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<BackgroundColor/>\n");
+
+        // TODO
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<OverrideURL/>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        if (self.tags != null and self.tags.?.len > 0) {
+            try out.writeAll("<Tags>");
+            try out.writeAll(self.tags.?);
+            try out.writeAll("</Tags>\n");
+        } else {
+            try out.writeAll("<Tags/>\n");
+        }
+
+        try self.times.toXml(out, level + 1, self.allocator);
+
+        for (self.strings.items) |kv| {
+            try kv.toXml(
+                out,
+                level + 1,
+                self.allocator,
+                cipher,
+            );
+        }
+
+        if (self.auto_type) |at| {
+            try at.toXml(out, level + 1, self.allocator);
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<AutoType/>\n");
+        }
+
+        if (self.history) |hist| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<History>\n");
+
+            for (hist.items) |entry| {
+                try entry.toXml(out, level + 2, cipher);
+            }
+
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("</History>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<History/>\n");
+        }
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Entry>\n");
     }
 
     pub fn deinit(self: *const @This()) void {
@@ -602,6 +719,54 @@ pub const Times = struct {
     expires: bool,
     usage_count: i64,
     location_changed: i64,
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        allocator: Allocator,
+    ) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Times>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastModificationTime>");
+        try xml.writeI64(out, self.last_modification_time, allocator);
+        try out.writeAll("</LastModificationTime>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<CreationTime>");
+        try xml.writeI64(out, self.creation_time, allocator);
+        try out.writeAll("</CreationTime>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastAccessTime>");
+        try xml.writeI64(out, self.last_access_time, allocator);
+        try out.writeAll("</LastAccessTime>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ExpiryTime>");
+        try xml.writeI64(out, self.expiry_time, allocator);
+        try out.writeAll("</ExpiryTime>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Expires>");
+        try xml.writeBool(out, self.expires);
+        try out.writeAll("</Expires>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<UsageCount>");
+        try out.print("{d}", .{self.usage_count});
+        try out.writeAll("</UsageCount>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LocationChanged>");
+        try xml.writeI64(out, self.location_changed, allocator);
+        try out.writeAll("</LocationChanged>\n");
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Times>\n");
+    }
 };
 
 pub const AutoType = struct {
@@ -611,6 +776,36 @@ pub const AutoType = struct {
 
     pub fn deinit(self: *const @This(), allocator: Allocator) void {
         if (self.default_sequence) |s| allocator.free(s);
+    }
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        allocator: Allocator,
+    ) !void {
+        _ = allocator;
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<AutoType>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Enabled>");
+        try xml.writeBool(out, self.enabled);
+        try out.writeAll("</Enabled>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DataTransferObfuscation>");
+        try out.print("{d}", .{self.data_transfer_obfuscation});
+        try out.writeAll("</DataTransferObfuscation>\n");
+
+        // TODO: Figure out what a DefaultSequence looks like
+        //       and serialize it correctly.
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DefaultSequence/>\n");
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</AutoType>\n");
     }
 };
 
@@ -1309,6 +1504,7 @@ test "the decryption of a kdbx4 file #1" {
 
     try std.testing.expectEqual(InnerHeader.StreamCipher.ChaCha20, body.inner_header.stream_cipher);
 
+    //std.debug.print("{s}", .{std.fmt.fmtSliceHexLower(body.inner_header.stream_key)});
     //std.debug.print("{s}\n", .{body.xml});
 
     const body_xml = try body.getXml(std.testing.allocator);
@@ -1471,4 +1667,177 @@ test "the decryption of a kdbx4 file #2" {
     try std.testing.expectEqualSlices(u8, "passkey.org", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_RELYING_PARTY").?);
     try std.testing.expectEqualSlices(u8, "peter", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_USERNAME").?);
     try std.testing.expectEqualSlices(u8, "DEMO__9fX19ERU1P", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_USER_HANDLE").?);
+}
+
+test "xml tests" {
+    _ = xml;
+}
+
+test "serialize Times to XML" {
+    const t = Times{
+        .last_modification_time = 0x0edbb52295,
+        .creation_time = 0x0edbb37087,
+        .last_access_time = 0x0edbb52295,
+        .expiry_time = 0x0edbb37087,
+        .expires = false,
+        .usage_count = 0,
+        .location_changed = 0x0edbb37091,
+    };
+
+    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    defer arr.deinit();
+
+    try t.toXml(arr.writer(), 0, std.testing.allocator);
+
+    const expected: []const u8 =
+        \\<Times>
+        \\  <LastModificationTime>lSK12w4AAAA=</LastModificationTime>
+        \\  <CreationTime>h3Cz2w4AAAA=</CreationTime>
+        \\  <LastAccessTime>lSK12w4AAAA=</LastAccessTime>
+        \\  <ExpiryTime>h3Cz2w4AAAA=</ExpiryTime>
+        \\  <Expires>False</Expires>
+        \\  <UsageCount>0</UsageCount>
+        \\  <LocationChanged>kXCz2w4AAAA=</LocationChanged>
+        \\</Times>
+        \\
+    ;
+
+    try std.testing.expectEqualSlices(u8, expected, arr.items);
+}
+
+test "serialize AutoType to XML" {
+    const t = AutoType{
+        .enabled = true,
+        .data_transfer_obfuscation = 0,
+        .default_sequence = null,
+    };
+
+    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    defer arr.deinit();
+
+    try t.toXml(arr.writer(), 0, std.testing.allocator);
+
+    const expected: []const u8 =
+        \\<AutoType>
+        \\  <Enabled>True</Enabled>
+        \\  <DataTransferObfuscation>0</DataTransferObfuscation>
+        \\  <DefaultSequence/>
+        \\</AutoType>
+        \\
+    ;
+
+    try std.testing.expectEqualSlices(u8, expected, arr.items);
+}
+
+test "serialize entry #1" {
+    const allocator = std.testing.allocator;
+
+    const expected =
+        \\<Entry>
+        \\  <UUID>D/LLsWnVT9q7aNpnKR3LBw==</UUID>
+        \\  <IconID>0</IconID>
+        \\  <ForegroundColor/>
+        \\  <BackgroundColor/>
+        \\  <OverrideURL/>
+        \\  <Tags>programming</Tags>
+        \\  <Times>
+        \\    <LastModificationTime>Noxl3g4AAAA=</LastModificationTime>
+        \\    <CreationTime>HIxl3g4AAAA=</CreationTime>
+        \\    <LastAccessTime>Noxl3g4AAAA=</LastAccessTime>
+        \\    <ExpiryTime>HIxl3g4AAAA=</ExpiryTime>
+        \\    <Expires>False</Expires>
+        \\    <UsageCount>0</UsageCount>
+        \\    <LocationChanged>Noxl3g4AAAA=</LocationChanged>
+        \\  </Times>
+        \\  <String>
+        \\    <Key>Notes</Key>
+        \\    <Value/>
+        \\  </String>
+        \\  <String>
+        \\    <Key>Password</Key>
+        \\    <Value Protected="True">h16dtqbi</Value>
+        \\  </String>
+        \\  <String>
+        \\    <Key>Title</Key>
+        \\    <Value>Github</Value>
+        \\  </String>
+        \\  <String>
+        \\    <Key>URL</Key>
+        \\    <Value>https://github.com</Value>
+        \\  </String>
+        \\  <String>
+        \\    <Key>UserName</Key>
+        \\    <Value>max</Value>
+        \\  </String>
+        \\  <AutoType>
+        \\    <Enabled>True</Enabled>
+        \\    <DataTransferObfuscation>0</DataTransferObfuscation>
+        \\    <DefaultSequence/>
+        \\  </AutoType>
+        \\  <History/>
+        \\</Entry>
+        \\
+    ;
+
+    var arr = std.ArrayList(KeyValue).init(allocator);
+
+    try arr.append(KeyValue{
+        .key = try allocator.dupe(u8, "Notes"),
+        .value = try allocator.dupe(u8, ""),
+    });
+    try arr.append(KeyValue{
+        .key = try allocator.dupe(u8, "Password"),
+        .value = try allocator.dupe(u8, "123456"),
+        .protected = true,
+    });
+    try arr.append(KeyValue{
+        .key = try allocator.dupe(u8, "Title"),
+        .value = try allocator.dupe(u8, "Github"),
+    });
+    try arr.append(KeyValue{
+        .key = try allocator.dupe(u8, "URL"),
+        .value = try allocator.dupe(u8, "https://github.com"),
+    });
+    try arr.append(KeyValue{
+        .key = try allocator.dupe(u8, "UserName"),
+        .value = try allocator.dupe(u8, "max"),
+    });
+
+    const entry = Entry{
+        .uuid = try Uuid.urn.deserialize("0ff2cbb1-69d5-4fda-bb68-da67291dcb07"),
+        .icon_id = 0,
+        .tags = try allocator.dupe(u8, "programming"),
+        .times = .{
+            .last_modification_time = 63860739126,
+            .creation_time = 63860739100,
+            .last_access_time = 63860739126,
+            .expiry_time = 63860739100,
+            .expires = false,
+            .usage_count = 0,
+            .location_changed = 63860739126,
+        },
+        .strings = arr,
+        .auto_type = .{
+            .enabled = true,
+            .data_transfer_obfuscation = 0,
+        },
+        .allocator = allocator,
+    };
+    defer entry.deinit();
+
+    var digest: [64]u8 = .{0} ** 64;
+    std.crypto.hash.sha2.Sha512.hash("\xaa\xc0\x53\xb5\x37\x5b\xb0\x93\xba\xd1\xcb\x42\xae\xf1\x83\x23\xde\x86\x72\x2e\x49\x30\xa7\xac\x22\x69\x6d\x64\x24\x7b\xfc\x79\x3d\x58\xa7\x1e\xf0\x5b\x35\x52\x6f\x87\x26\xb3\x55\x57\x22\x2d\xb0\xfa\x62\x00\x2d\x6d\x5e\x96\x21\x7e\xf8\x7f\x72\x87\x13\xc7", &digest, .{});
+
+    var chacha20 = ChaCha20.init(
+        0,
+        digest[0..32].*,
+        digest[32..44].*,
+    );
+
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    try entry.toXml(out.writer(), 0, &chacha20);
+
+    try std.testing.expectEqualSlices(u8, expected, out.items);
 }

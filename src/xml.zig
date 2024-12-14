@@ -245,6 +245,7 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
         errdefer allocator.free(key);
         var value = try fetchTagValue(kv, "Value", allocator);
         errdefer allocator.free(value);
+        var protected = false;
 
         // Deobfuscate value if "Protected = True"
         // Value is present because otherwise the try above would already have thrown an error.
@@ -257,9 +258,15 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
             cipher.xor(value_);
             allocator.free(value);
             value = value_;
+
+            protected = true;
         }
 
-        try strings.append(KeyValue{ .key = key, .value = value });
+        try strings.append(KeyValue{
+            .key = key,
+            .value = value,
+            .protected = protected,
+        });
     }
 
     const auto_type = elem.elementByTagName("AutoType");
@@ -537,4 +544,42 @@ fn fetchUuid(elem: dishwasher.Document.Node.Element, name: []const u8, allocator
     defer allocator.free(dnc);
     try std.base64.standard.Decoder.decode(dnc, time);
     return std.mem.readInt(Uuid.Uuid, dnc[0..16], .little);
+}
+
+// ------------------------------ Serialize -------------------------------
+
+pub fn writeBool(out: anytype, v: bool) !void {
+    try out.writeAll(if (v) "True" else "False");
+}
+
+pub fn writeI64(out: anytype, v: i64, allocator: Allocator) !void {
+    var v_: [8]u8 = undefined;
+    std.mem.writeInt(i64, &v_, v, .little);
+    try writeBase64(out, v_[0..], allocator);
+}
+
+pub fn writeUuid(out: anytype, uuid: Uuid.Uuid, allocator: Allocator) !void {
+    var uuid_: [16]u8 = undefined;
+    std.mem.writeInt(Uuid.Uuid, &uuid_, uuid, .little);
+    try writeBase64(out, uuid_[0..], allocator);
+}
+
+pub fn writeBase64(out: anytype, in: []const u8, allocator: Allocator) !void {
+    const l = std.base64.standard.Encoder.calcSize(in.len);
+    const m = try allocator.alloc(u8, l);
+    defer {
+        std.crypto.utils.secureZero(u8, m);
+        allocator.free(m);
+    }
+    _ = std.base64.standard.Encoder.encode(m, in);
+    try out.writeAll(m);
+}
+
+test "write uuid #1" {
+    // D/LLsWnVT9q7aNpnKR3LBw==
+    const id = try Uuid.urn.deserialize("0ff2cbb1-69d5-4fda-bb68-da67291dcb07");
+    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    defer arr.deinit();
+    try writeUuid(arr.writer(), id, std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, "D/LLsWnVT9q7aNpnKR3LBw==", arr.items);
 }
