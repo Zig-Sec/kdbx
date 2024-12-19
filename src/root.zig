@@ -559,6 +559,105 @@ pub const Group = struct {
     groups: std.ArrayList(Group),
     allocator: Allocator,
 
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        cipher: *ChaCha20,
+    ) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Group>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<UUID>");
+        try xml.writeUuid(out, self.uuid, self.allocator);
+        try out.writeAll("</UUID>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Name>");
+        try out.writeAll(self.name);
+        try out.writeAll("</Name>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        if (self.notes) |notes| {
+            try out.writeAll("<Notes>");
+            try out.writeAll(notes);
+            try out.writeAll("</Notes>\n");
+        } else {
+            try out.writeAll("<Notes/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<IconID>");
+        try out.print("{d}", .{self.icon_id});
+        try out.writeAll("</IconID>\n");
+
+        try self.times.toXml(out, level + 1, self.allocator);
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<IsExpanded>");
+        try out.print("{s}", .{if (self.is_expanded) "True" else "False"});
+        try out.writeAll("</IsExpanded>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        if (self.default_auto_type_sequence) |seq| {
+            try out.writeAll("<DefaultAutoTypeSequence>");
+            try out.writeAll(seq);
+            try out.writeAll("</DefaultAutoTypeSequence>\n");
+        } else {
+            try out.writeAll("<DefaultAutoTypeSequence/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        if (self.enable_auto_type) |t| {
+            try out.writeAll("<EnableAutoType>");
+            try out.print("{s}", .{if (t) "True" else "False"});
+            try out.writeAll("</EnableAutoType>\n");
+        } else {
+            try out.writeAll("<EnableAutoType>null</EnableAutoType>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        if (self.enable_searching) |t| {
+            try out.writeAll("<EnableSearching>");
+            try out.print("{s}", .{if (t) "True" else "False"});
+            try out.writeAll("</EnableSearching>\n");
+        } else {
+            try out.writeAll("<EnableSearching>null</EnableSearching>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastTopVisibleEntry>");
+        try xml.writeUuid(
+            out,
+            self.last_top_visible_entry,
+            self.allocator,
+        );
+        try out.writeAll("</LastTopVisibleEntry>\n");
+
+        if (self.previous_parent_group) |ppg| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<PreviousParentGroup>");
+            try xml.writeUuid(
+                out,
+                ppg,
+                self.allocator,
+            );
+            try out.writeAll("</PreviousParentGroup>\n");
+        }
+
+        for (self.entries.items) |entry| {
+            try entry.toXml(out, level + 1, cipher);
+        }
+
+        for (self.groups.items) |group| {
+            try group.toXml(out, level + 1, cipher);
+        }
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Group>\n");
+    }
+
     pub fn deinit(self: *const @This()) void {
         std.crypto.utils.secureZero(u8, self.name);
         self.allocator.free(self.name);
@@ -607,7 +706,33 @@ pub const Entry = struct {
         return null;
     }
 
-    pub fn toXml(self: *const @This(), out: anytype, level: usize, cipher: *ChaCha20) !void {
+    pub fn set(self: *@This(), key: []const u8, value: []const u8, protect: bool) !void {
+        self.times.last_access_time = std.time.timestamp() + TIME_DIFF_KDBX_EPOCH_IN_SEC;
+        self.times.last_modification_time = self.times.last_access_time;
+
+        for (self.strings.items) |*kv| {
+            if (std.mem.eql(u8, key, kv.*.key)) {
+                const m = try self.allocator.dupe(u8, value);
+                self.allocator.free(kv.*.value);
+                kv.*.value = m;
+                return;
+            }
+        }
+
+        const k = try self.allocator.dupe(u8, key);
+        errdefer self.allocator.free(k);
+        const v = try self.allocator.dupe(u8, value);
+        errdefer self.allocator.free(v);
+
+        try self.strings.append(.{ .key = k, .value = v, .protected = protect });
+    }
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        cipher: *ChaCha20,
+    ) !void {
         for (0..level * XML_INDENT) |_| try out.writeByte(' ');
         try out.writeAll("<Entry>\n");
 
@@ -1838,6 +1963,237 @@ test "serialize entry #1" {
     defer out.deinit();
 
     try entry.toXml(out.writer(), 0, &chacha20);
+
+    try std.testing.expectEqualSlices(u8, expected, out.items);
+}
+
+test "serialize entry #2" {
+    const allocator = std.testing.allocator;
+
+    const expected =
+        \\<Group>
+        \\  <UUID>TDZnaQfoS8mAkT5crv6XEA==</UUID>
+        \\  <Name>Root</Name>
+        \\  <Notes/>
+        \\  <IconID>48</IconID>
+        \\  <Times>
+        \\    <LastModificationTime>b4xl3g4AAAA=</LastModificationTime>
+        \\    <CreationTime>0Itl3g4AAAA=</CreationTime>
+        \\    <LastAccessTime>b4xl3g4AAAA=</LastAccessTime>
+        \\    <ExpiryTime>0Itl3g4AAAA=</ExpiryTime>
+        \\    <Expires>False</Expires>
+        \\    <UsageCount>0</UsageCount>
+        \\    <LocationChanged>0Itl3g4AAAA=</LocationChanged>
+        \\  </Times>
+        \\  <IsExpanded>True</IsExpanded>
+        \\  <DefaultAutoTypeSequence/>
+        \\  <EnableAutoType>null</EnableAutoType>
+        \\  <EnableSearching>null</EnableSearching>
+        \\  <LastTopVisibleEntry>AAAAAAAAAAAAAAAAAAAAAA==</LastTopVisibleEntry>
+        \\  <Entry>
+        \\    <UUID>D/LLsWnVT9q7aNpnKR3LBw==</UUID>
+        \\    <IconID>0</IconID>
+        \\    <ForegroundColor/>
+        \\    <BackgroundColor/>
+        \\    <OverrideURL/>
+        \\    <Tags>programming</Tags>
+        \\    <Times>
+        \\      <LastModificationTime>Noxl3g4AAAA=</LastModificationTime>
+        \\      <CreationTime>HIxl3g4AAAA=</CreationTime>
+        \\      <LastAccessTime>Noxl3g4AAAA=</LastAccessTime>
+        \\      <ExpiryTime>HIxl3g4AAAA=</ExpiryTime>
+        \\      <Expires>False</Expires>
+        \\      <UsageCount>0</UsageCount>
+        \\      <LocationChanged>Noxl3g4AAAA=</LocationChanged>
+        \\    </Times>
+        \\    <String>
+        \\      <Key>Notes</Key>
+        \\      <Value/>
+        \\    </String>
+        \\    <String>
+        \\      <Key>Password</Key>
+        \\      <Value Protected="True">h16dtqbi</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>Title</Key>
+        \\      <Value>Github</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>URL</Key>
+        \\      <Value>https://github.com</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>UserName</Key>
+        \\      <Value>max</Value>
+        \\    </String>
+        \\    <AutoType>
+        \\      <Enabled>True</Enabled>
+        \\      <DataTransferObfuscation>0</DataTransferObfuscation>
+        \\      <DefaultSequence/>
+        \\    </AutoType>
+        \\    <History/>
+        \\  </Entry>
+        \\  <Entry>
+        \\    <UUID>Fkt7IHIgRHGuvzAjpwSy9A==</UUID>
+        \\    <IconID>0</IconID>
+        \\    <ForegroundColor/>
+        \\    <BackgroundColor/>
+        \\    <OverrideURL/>
+        \\    <Tags/>
+        \\    <Times>
+        \\      <LastModificationTime>b4xl3g4AAAA=</LastModificationTime>
+        \\      <CreationTime>OIxl3g4AAAA=</CreationTime>
+        \\      <LastAccessTime>b4xl3g4AAAA=</LastAccessTime>
+        \\      <ExpiryTime>OIxl3g4AAAA=</ExpiryTime>
+        \\      <Expires>False</Expires>
+        \\      <UsageCount>0</UsageCount>
+        \\      <LocationChanged>b4xl3g4AAAA=</LocationChanged>
+        \\    </Times>
+        \\    <String>
+        \\      <Key>Notes</Key>
+        \\      <Value/>
+        \\    </String>
+        \\    <String>
+        \\      <Key>Password</Key>
+        \\      <Value Protected="True">BY1N++nX</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>Title</Key>
+        \\      <Value>Codeberg</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>URL</Key>
+        \\      <Value>https://codeberg.org</Value>
+        \\    </String>
+        \\    <String>
+        \\      <Key>UserName</Key>
+        \\      <Value>max</Value>
+        \\    </String>
+        \\    <AutoType>
+        \\      <Enabled>True</Enabled>
+        \\      <DataTransferObfuscation>0</DataTransferObfuscation>
+        \\      <DefaultSequence/>
+        \\    </AutoType>
+        \\    <History/>
+        \\  </Entry>
+        \\</Group>
+        \\
+    ;
+
+    var entry1 = Entry{
+        .uuid = try Uuid.urn.deserialize("0ff2cbb1-69d5-4fda-bb68-da67291dcb07"),
+        .icon_id = 0,
+        .tags = try allocator.dupe(u8, "programming"),
+        .times = .{
+            .last_modification_time = 63860739126,
+            .creation_time = 63860739100,
+            .last_access_time = 63860739126,
+            .expiry_time = 63860739100,
+            .expires = false,
+            .usage_count = 0,
+            .location_changed = 63860739126,
+        },
+        .strings = std.ArrayList(KeyValue).init(allocator),
+        .auto_type = .{
+            .enabled = true,
+            .data_transfer_obfuscation = 0,
+        },
+        .allocator = allocator,
+    };
+    try entry1.set("Notes", "", false);
+    try entry1.set("Password", "123456", true);
+    try entry1.set("Title", "Github", false);
+    try entry1.set("URL", "https://github.com", false);
+    try entry1.set("UserName", "max", false);
+    entry1.times = .{
+        .last_modification_time = 63860739126,
+        .creation_time = 63860739100,
+        .last_access_time = 63860739126,
+        .expiry_time = 63860739100,
+        .expires = false,
+        .usage_count = 0,
+        .location_changed = 63860739126,
+    };
+
+    var entry2 = Entry{
+        .uuid = try Uuid.urn.deserialize("164b7b20-7220-4471-aebf-3023a704b2f4"),
+        .icon_id = 0,
+        .tags = null,
+        .times = .{
+            .last_modification_time = 0x0ede658c6f,
+            .creation_time = 0x0ede658c38,
+            .last_access_time = 0x0ede658c6f,
+            .expiry_time = 0x0ede658c38,
+            .expires = false,
+            .usage_count = 0,
+            .location_changed = 0x0ede658c6f,
+        },
+        .strings = std.ArrayList(KeyValue).init(allocator),
+        .auto_type = .{
+            .enabled = true,
+            .data_transfer_obfuscation = 0,
+        },
+        .allocator = allocator,
+    };
+    try entry2.set("Notes", "", false);
+    try entry2.set("Password", "654321", true);
+    try entry2.set("Title", "Codeberg", false);
+    try entry2.set("URL", "https://codeberg.org", false);
+    try entry2.set("UserName", "max", false);
+    entry2.times = .{
+        .last_modification_time = 0x0ede658c6f,
+        .creation_time = 0x0ede658c38,
+        .last_access_time = 0x0ede658c6f,
+        .expiry_time = 0x0ede658c38,
+        .expires = false,
+        .usage_count = 0,
+        .location_changed = 0x0ede658c6f,
+    };
+
+    var group = Group{
+        .uuid = try Uuid.urn.deserialize("4c366769-07e8-4bc9-8091-3e5caefe9710"),
+        .name = try allocator.dupe(u8, "Root"),
+        .notes = null,
+        .icon_id = 48,
+        .times = .{
+            .last_modification_time = 0x0ede658c6f,
+            .creation_time = 0x0ede658bd0,
+            .last_access_time = 0x0ede658c6f,
+            .expiry_time = 0x0ede658bd0,
+            .expires = false,
+            .usage_count = 0,
+            .location_changed = 0x0ede658bd0,
+        },
+        .is_expanded = true,
+        .default_auto_type_sequence = null,
+        .enable_auto_type = null,
+        .enable_searching = null,
+        .last_top_visible_entry = 0,
+        .previous_parent_group = null,
+        .entries = std.ArrayList(Entry).init(allocator),
+        .groups = std.ArrayList(Group).init(allocator),
+        .allocator = allocator,
+    };
+    defer group.deinit();
+
+    try group.entries.append(entry1);
+    try group.entries.append(entry2);
+
+    var digest: [64]u8 = .{0} ** 64;
+    std.crypto.hash.sha2.Sha512.hash("\xaa\xc0\x53\xb5\x37\x5b\xb0\x93\xba\xd1\xcb\x42\xae\xf1\x83\x23\xde\x86\x72\x2e\x49\x30\xa7\xac\x22\x69\x6d\x64\x24\x7b\xfc\x79\x3d\x58\xa7\x1e\xf0\x5b\x35\x52\x6f\x87\x26\xb3\x55\x57\x22\x2d\xb0\xfa\x62\x00\x2d\x6d\x5e\x96\x21\x7e\xf8\x7f\x72\x87\x13\xc7", &digest, .{});
+
+    var chacha20 = ChaCha20.init(
+        0,
+        digest[0..32].*,
+        digest[32..44].*,
+    );
+
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    try group.toXml(out.writer(), 0, &chacha20);
+
+    //std.debug.print("{s}\n", .{out.items});
 
     try std.testing.expectEqualSlices(u8, expected, out.items);
 }
