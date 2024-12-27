@@ -28,6 +28,114 @@ pub const Header = struct {
         .{ 0xB54BFB67, 4 }, // signature and major version
     };
 
+    pub fn writeHeader(self: *const @This(), out: anytype) !void {
+        try self.version.write(out);
+
+        for (self.fields[0..]) |field_| {
+            if (field_) |field| {
+                switch (field) {
+                    .cipher_id => |id| {
+                        try out.writeAll("\x02\x10\x00\x00\x00");
+                        try encode2(out, 16, @intFromEnum(id));
+                    },
+                    .compression => |comp| {
+                        try out.writeAll("\x03\x04\x00\x00\x00");
+                        try encode2(out, 4, @intFromEnum(comp));
+                    },
+                    .main_seed => |seed| {
+                        try out.writeByte(0x04);
+                        try encode2(out, 4, @as(u32, 32));
+                        try out.writeAll(seed[0..]);
+                    },
+                    .encryption_iv => |iv| {
+                        try out.writeByte(0x07);
+
+                        switch (self.getCipherId()) {
+                            .aes128_cbc, .aes256_cbc, .twofish_cbc => {
+                                try encode2(out, 4, @as(u32, 16));
+                                try out.writeAll(iv[0..16]);
+                            },
+                            .chacha20 => {
+                                try encode2(out, 4, @as(u32, 12));
+                                try out.writeAll(iv[0..12]);
+                            },
+                        }
+                    },
+                    .kdf_parameters => |params| {
+                        try out.writeByte(0x0b);
+
+                        switch (params) {
+                            .aes => return error.SerializingAesKdfParametersNotSupported,
+                            .argon2 => |argon2| {
+                                try out.writeAll("\x8b\x00\x00\x00"); // this is always the same
+                                try out.writeAll("\x00\x01"); // version
+
+                                // $UUID
+                                try out.writeByte(0x42);
+                                try encode2(out, 4, @as(u32, 5));
+                                try out.writeAll("$UUID");
+                                try encode2(out, 4, @as(u32, 16));
+                                switch (argon2.mode) {
+                                    .argon2d => try out.writeAll("\xef\x63\x6d\xdf\x8c\x29\x44\x4b\x91\xf7\xa9\xa4\x03\xe3\x0a\x0c"),
+                                    .argon2id => try out.writeAll("\x9e\x29\x8b\x19\x56\xdb\x47\x73\xb2\x3d\xfc\x3e\xc6\xf0\xa1\xe6"),
+                                    .argon2i => return error.KdfParamsArgon2iNotSupportedForSerialization,
+                                }
+
+                                // I
+                                try out.writeByte(0x05);
+                                try encode2(out, 4, @as(u32, 1));
+                                try out.writeByte('I');
+                                try encode2(out, 4, @as(u32, 8));
+                                try encode2(out, 8, argon2.i);
+
+                                // M
+                                try out.writeByte(0x05);
+                                try encode2(out, 4, @as(u32, 1));
+                                try out.writeByte('M');
+                                try encode2(out, 4, @as(u32, 8));
+                                try encode2(out, 8, argon2.m);
+
+                                // P
+                                try out.writeByte(0x04);
+                                try encode2(out, 4, @as(u32, 1));
+                                try out.writeByte('P');
+                                try encode2(out, 4, @as(u32, 4));
+                                try encode2(out, 4, argon2.p);
+
+                                // S
+                                try out.writeByte(0x42);
+                                try encode2(out, 4, @as(u32, 1));
+                                try out.writeByte('S');
+                                try encode2(out, 4, @as(u32, 32));
+                                try out.writeAll(argon2.s[0..]);
+
+                                // V
+                                try out.writeByte(0x04);
+                                try encode2(out, 4, @as(u32, 1));
+                                try out.writeByte('V');
+                                try encode2(out, 4, @as(u32, 4));
+                                try encode2(out, 4, argon2.v);
+
+                                // TODO: do we need to care about k and a???
+                            },
+                        }
+
+                        try out.writeByte(0x00);
+                    },
+                    .public_custom_data => {
+                        return error.SerializingPublicCustomDataNotSupported;
+                    },
+                    .end_of_header => {
+                        // We serialize it extra (see below)...
+                    },
+                }
+            }
+        }
+
+        // End of Heder
+        try out.writeAll("\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a");
+    }
+
     pub fn readAlloc(reader: anytype, allocator: Allocator) !@This() {
         var j: usize = 0;
         // Read and validate version
@@ -410,6 +518,30 @@ pub const XML = struct {
     pub fn deinit(self: *const @This()) void {
         self.meta.deinit();
         self.root.deinit();
+    }
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        cipher: *ChaCha20,
+    ) !void {
+        try out.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
+        try out.writeAll("<KeePassFile>\n");
+        {
+            try self.meta.toXml(out, 1);
+
+            for (0..1 * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<Root>\n");
+            {
+                try self.root.toXml(out, 2, cipher);
+
+                for (0..2 * XML_INDENT) |_| try out.writeByte(' ');
+                try out.writeAll("<DeletedObjects/>\n");
+            }
+            for (0..1 * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("</Root>\n");
+        }
+        try out.writeAll("</KeePassFile>\n");
     }
 };
 
@@ -1207,6 +1339,10 @@ pub const HVersion = struct {
         return tmp;
     }
 
+    pub fn write(self: *const @This(), out: anytype) !void {
+        try out.writeAll(self.raw[0..]);
+    }
+
     pub fn @"versionSupported?"(self: *const @This(), versions: []const [2]u32) bool {
         for (versions) |version| {
             if (self.getSignature2() == version[0] and self.getMajorVersion() == version[1])
@@ -1779,6 +1915,33 @@ fn encode(comptime n: usize, int: anytype) [n]u8 {
     return tmp;
 }
 
+fn encodeU32(out: anytype, v: u32) !void {
+    try out.writeByte(@as(u8, @intCast(v & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 8) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 16) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 24) & 0xff)));
+}
+
+fn encodeU64(out: anytype, v: u64) !void {
+    try out.writeByte(@as(u8, @intCast(v & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 8) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 16) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 24) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 32) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 40) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 48) & 0xff)));
+    try out.writeByte(@as(u8, @intCast((v >> 56) & 0xff)));
+}
+
+fn encode2(out: anytype, l: usize, v: anytype) !void {
+    var v2: @TypeOf(v) = v;
+
+    for (0..l) |_| {
+        try out.writeByte(@as(u8, @intCast(v2 & 0xff)));
+        v2 >>= 8;
+    }
+}
+
 fn decode(T: type, arr: anytype) T {
     const bytes = @typeInfo(T).Int.bits / 8;
     var tmp: T = 0;
@@ -1838,6 +2001,23 @@ test "decode outer header" {
     try std.testing.expectEqual(@as(u64, 0x40000000), kdf.argon2.m);
     try std.testing.expectEqual(@as(u32, 8), kdf.argon2.p);
     try std.testing.expectEqual(@as(u32, 0x13), kdf.argon2.v);
+}
+
+test "decode and encode header #1" {
+    const s = "\x03\xd9\xa2\x9a\x67\xfb\x4b\xb5\x01\x00\x04\x00\x02\x10\x00\x00\x00\x31\xc1\xf2\xe6\xbf\x71\x43\x50\xbe\x58\x05\x21\x6a\xfc\x5a\xff\x03\x04\x00\x00\x00\x01\x00\x00\x00\x04\x20\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x07\x10\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x0b\x8b\x00\x00\x00\x00\x01\x42\x05\x00\x00\x00\x24\x55\x55\x49\x44\x10\x00\x00\x00\xef\x63\x6d\xdf\x8c\x29\x44\x4b\x91\xf7\xa9\xa4\x03\xe3\x0a\x0c\x05\x01\x00\x00\x00\x49\x08\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x05\x01\x00\x00\x00\x4d\x08\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x04\x01\x00\x00\x00\x50\x04\x00\x00\x00\x08\x00\x00\x00\x42\x01\x00\x00\x00\x53\x20\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x04\x01\x00\x00\x00\x56\x04\x00\x00\x00\x13\x00\x00\x00\x00\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a\xed\x5b\xd6\x7f\x65\x86\xe4\x59\xf1\xa0\x5d\xbe\xae\x4a\xaa\x72\x9a\x6b\x85\x51\x83\x87\x2a\xc4\x65\xaf\x2d\x5c\x5b\x77\x1d\x6d";
+    const s2 = "\x03\xd9\xa2\x9a\x67\xfb\x4b\xb5\x01\x00\x04\x00\x02\x10\x00\x00\x00\x31\xc1\xf2\xe6\xbf\x71\x43\x50\xbe\x58\x05\x21\x6a\xfc\x5a\xff\x03\x04\x00\x00\x00\x01\x00\x00\x00\x04\x20\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x07\x10\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x0b\x8b\x00\x00\x00\x00\x01\x42\x05\x00\x00\x00\x24\x55\x55\x49\x44\x10\x00\x00\x00\xef\x63\x6d\xdf\x8c\x29\x44\x4b\x91\xf7\xa9\xa4\x03\xe3\x0a\x0c\x05\x01\x00\x00\x00\x49\x08\x00\x00\x00\x02\x00\x00\x00\x00\x00\x00\x00\x05\x01\x00\x00\x00\x4d\x08\x00\x00\x00\x00\x00\x00\x40\x00\x00\x00\x00\x04\x01\x00\x00\x00\x50\x04\x00\x00\x00\x08\x00\x00\x00\x42\x01\x00\x00\x00\x53\x20\x00\x00\x00\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x04\x01\x00\x00\x00\x56\x04\x00\x00\x00\x13\x00\x00\x00\x00\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a";
+
+    var fbs = std.io.fixedBufferStream(s);
+
+    const header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
+    defer header.deinit();
+
+    var new_header = std.ArrayList(u8).init(std.testing.allocator);
+    defer new_header.deinit();
+
+    try header.writeHeader(new_header.writer());
+
+    try std.testing.expectEqualSlices(u8, s2, new_header.items);
 }
 
 const db = @embedFile("static/testdb.kdbx");
