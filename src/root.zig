@@ -427,25 +427,243 @@ pub const Meta = struct {
     master_key_change_rec: i64,
     master_key_change_force: i64,
     memory_protection: struct {
-        protect_title: bool,
-        protect_user_name: bool,
-        protect_password: bool,
-        protect_url: bool,
-        protect_notes: bool,
-    },
+        protect_title: bool = false,
+        protect_user_name: bool = false,
+        protect_password: bool = true,
+        protect_url: bool = false,
+        protect_notes: bool = false,
+    } = .{},
     custom_icons: ?std.ArrayList(Icon) = null,
-    recycle_bin_enabled: bool,
-    recycle_bin_uuid: Uuid.Uuid,
+    recycle_bin_enabled: bool = true,
+    recycle_bin_uuid: Uuid.Uuid = 0,
     recycle_bin_changed: i64,
-    entry_template_group: Uuid.Uuid,
+    entry_template_group: Uuid.Uuid = 0,
     entry_template_group_changed: i64,
-    last_selected_group: Uuid.Uuid,
-    last_top_visible_group: Uuid.Uuid,
-    history_max_items: i64,
-    history_max_size: i64,
+    last_selected_group: Uuid.Uuid = 0,
+    last_top_visible_group: Uuid.Uuid = 0,
+    history_max_items: i64 = 10,
+    history_max_size: i64 = 6291456,
     settings_changed: i64,
     custom_data: std.ArrayList(KeyValue),
     allocator: Allocator,
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+    ) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Meta>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Generator>");
+        try out.writeAll(self.generator);
+        try out.writeAll("</Generator>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DatabaseName>");
+        try out.writeAll(self.database_name);
+        try out.writeAll("</DatabaseName>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DatabaseNameChanged>");
+        try xml.writeI64(out, self.database_name_changed, self.allocator);
+        try out.writeAll("</DatabaseNameChanged>\n");
+
+        if (self.database_description) |desc| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<DatabaseDescription>");
+            try out.writeAll(desc);
+            try out.writeAll("</DatabaseDescription>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<DatabaseDescription/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DatabaseDescriptionChanged>");
+        try xml.writeI64(out, self.database_description_changed, self.allocator);
+        try out.writeAll("</DatabaseDescriptionChanged>\n");
+
+        if (self.default_user_name) |uname| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<DefaultUserName>");
+            try out.writeAll(uname);
+            try out.writeAll("</DefaultUserName>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<DefaultUserName/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<DefaultUserNameChanged>");
+        try xml.writeI64(out, self.default_user_name_changed, self.allocator);
+        try out.writeAll("</DefaultUserNameChanged>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<MaintenanceHistoryDays>");
+        try out.print("{d}", .{self.maintenance_history_days});
+        try out.writeAll("</MaintenanceHistoryDays>\n");
+
+        if (self.color) |color| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<Color>");
+            try out.writeAll(color);
+            try out.writeAll("</Color>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<Color/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<MasterKeyChanged>");
+        try xml.writeI64(out, self.master_key_changed, self.allocator);
+        try out.writeAll("</MasterKeyChanged>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<MasterKeyChangeRec>");
+        try out.print("{d}", .{self.master_key_change_rec});
+        try out.writeAll("</MasterKeyChangeRec>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<MasterKeyChangeForce>");
+        try out.print("{d}", .{self.master_key_change_force});
+        try out.writeAll("</MasterKeyChangeForce>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<MemoryProtection>\n");
+
+        for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ProtectTitle>");
+        try out.print("{s}", .{if (self.memory_protection.protect_title) "True" else "False"});
+        try out.writeAll("</ProtectTitle>\n");
+
+        for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ProtectUserName>");
+        try out.print("{s}", .{if (self.memory_protection.protect_user_name) "True" else "False"});
+        try out.writeAll("</ProtectUserName>\n");
+
+        for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ProtectPassword>");
+        try out.print("{s}", .{if (self.memory_protection.protect_password) "True" else "False"});
+        try out.writeAll("</ProtectPassword>\n");
+
+        for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ProtectURL>");
+        try out.print("{s}", .{if (self.memory_protection.protect_url) "True" else "False"});
+        try out.writeAll("</ProtectURL>\n");
+
+        for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<ProtectNotes>");
+        try out.print("{s}", .{if (self.memory_protection.protect_notes) "True" else "False"});
+        try out.writeAll("</ProtectNotes>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</MemoryProtection>\n");
+
+        if (self.custom_icons) |icons| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<CustomIcons>\n");
+
+            for (icons.items) |icon| try icon.toXml(
+                out,
+                level + 2,
+                self.allocator,
+            );
+
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("</CustomIcons>\n");
+        } else {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<CustomIcons/>\n");
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<RecycleBinEnabled>");
+        try out.print("{s}", .{if (self.recycle_bin_enabled) "True" else "False"});
+        try out.writeAll("</RecycleBinEnabled>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<RecycleBinUUID>");
+        try xml.writeUuid(out, self.recycle_bin_uuid, self.allocator);
+        try out.writeAll("</RecycleBinUUID>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<RecycleBinChanged>");
+        try xml.writeI64(out, self.recycle_bin_changed, self.allocator);
+        try out.writeAll("</RecycleBinChanged>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<EntryTemplatesGroup>");
+        try xml.writeUuid(out, self.entry_template_group, self.allocator);
+        try out.writeAll("</EntryTemplatesGroup>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<EntryTemplatesGroupChanged>");
+        try xml.writeI64(out, self.entry_template_group_changed, self.allocator);
+        try out.writeAll("</EntryTemplatesGroupChanged>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastSelectedGroup>");
+        try xml.writeUuid(out, self.last_selected_group, self.allocator);
+        try out.writeAll("</LastSelectedGroup>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastTopVisibleGroup>");
+        try xml.writeUuid(out, self.last_top_visible_group, self.allocator);
+        try out.writeAll("</LastTopVisibleGroup>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<HistoryMaxItems>");
+        try out.print("{d}", .{self.history_max_items});
+        try out.writeAll("</HistoryMaxItems>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<HistoryMaxSize>");
+        try out.print("{d}", .{self.history_max_size});
+        try out.writeAll("</HistoryMaxSize>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<SettingsChanged>");
+        try xml.writeI64(out, self.settings_changed, self.allocator);
+        try out.writeAll("</SettingsChanged>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<CustomData>\n");
+
+        {
+            for (self.custom_data.items) |data| {
+                for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+                try out.writeAll("<Item>\n");
+
+                for (0..(level + 3) * XML_INDENT) |_| try out.writeByte(' ');
+                try out.writeAll("<Key>");
+                try out.writeAll(data.key);
+                try out.writeAll("</Key>\n");
+
+                for (0..(level + 3) * XML_INDENT) |_| try out.writeByte(' ');
+                try out.writeAll("<Value>");
+                try out.writeAll(data.value);
+                try out.writeAll("</Value>\n");
+
+                if (data.last_modification_time) |t| {
+                    for (0..(level + 3) * XML_INDENT) |_| try out.writeByte(' ');
+                    try out.writeAll("<LastModificationTime>");
+                    try xml.writeI64(out, t, self.allocator);
+                    try out.writeAll("</LastModificationTime>\n");
+                }
+
+                for (0..(level + 2) * XML_INDENT) |_| try out.writeByte(' ');
+                try out.writeAll("</Item>\n");
+            }
+        }
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</CustomData>\n");
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Meta>\n");
+    }
 
     pub fn deinit(self: *const @This()) void {
         std.crypto.utils.secureZero(u8, self.generator);
@@ -484,6 +702,34 @@ pub const Icon = struct {
     last_modification_time: i64,
     data: []u8,
 
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        allocator: Allocator,
+    ) !void {
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Icon>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<UUID>");
+        try xml.writeUuid(out, self.uuid, allocator);
+        try out.writeAll("</UUID>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<LastModificationTime>");
+        try xml.writeI64(out, self.last_modification_time, allocator);
+        try out.writeAll("</LastModificationTime>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Data>");
+        try xml.writeBase64(out, self.data, allocator);
+        try out.writeAll("</Data>\n");
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Icon>\n");
+    }
+
     pub fn deinit(self: *const @This(), allocator: Allocator) void {
         std.crypto.utils.secureZero(u8, self.data);
         allocator.free(self.data);
@@ -493,6 +739,7 @@ pub const Icon = struct {
 pub const KeyValue = struct {
     key: []u8,
     value: []u8,
+    last_modification_time: ?i64 = null,
     protected: bool = false,
 
     pub fn deinit(self: *const @This(), allocator: Allocator) void {
@@ -536,6 +783,13 @@ pub const KeyValue = struct {
         } else {
             for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
             try out.writeAll("<Value/>\n");
+        }
+
+        if (self.last_modification_time) |time| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<LastModificationTime>");
+            try xml.writeI64(out, time, allocator);
+            try out.writeAll("</LastModificationTime>\n");
         }
 
         for (0..level * XML_INDENT) |_| try out.writeByte(' ');
@@ -2192,6 +2446,148 @@ test "serialize entry #2" {
     defer out.deinit();
 
     try group.toXml(out.writer(), 0, &chacha20);
+
+    //std.debug.print("{s}\n", .{out.items});
+
+    try std.testing.expectEqualSlices(u8, expected, out.items);
+}
+
+test "serialize Meta #1" {
+    const allocator = std.testing.allocator;
+
+    const expected =
+        \\<Meta>
+        \\  <Generator>KeePassXC</Generator>
+        \\  <DatabaseName>Zig Database Impl</DatabaseName>
+        \\  <DatabaseNameChanged>1Li13g4AAAA=</DatabaseNameChanged>
+        \\  <DatabaseDescription>This is another test database for the KDBX4 Zig impl</DatabaseDescription>
+        \\  <DatabaseDescriptionChanged>1Li13g4AAAA=</DatabaseDescriptionChanged>
+        \\  <DefaultUserName/>
+        \\  <DefaultUserNameChanged>F7i13g4AAAA=</DefaultUserNameChanged>
+        \\  <MaintenanceHistoryDays>365</MaintenanceHistoryDays>
+        \\  <Color/>
+        \\  <MasterKeyChanged>Erm13g4AAAA=</MasterKeyChanged>
+        \\  <MasterKeyChangeRec>-1</MasterKeyChangeRec>
+        \\  <MasterKeyChangeForce>-1</MasterKeyChangeForce>
+        \\  <MemoryProtection>
+        \\    <ProtectTitle>False</ProtectTitle>
+        \\    <ProtectUserName>False</ProtectUserName>
+        \\    <ProtectPassword>True</ProtectPassword>
+        \\    <ProtectURL>False</ProtectURL>
+        \\    <ProtectNotes>False</ProtectNotes>
+        \\  </MemoryProtection>
+        \\  <CustomIcons>
+        \\    <Icon>
+        \\      <UUID>ulxWAiHcRk6rhwFNSHp0wQ==</UUID>
+        \\      <LastModificationTime>gLm13g4AAAA=</LastModificationTime>
+        \\      <Data>iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAA7EAAAOxAGVKw4bAAAAEnRFWHRfcV9pY29PcmlnRGVwdGgAMzLV4rjsAAAEl0lEQVRYha1XUWhbVRj+vnPTNNvaSNnuTZpkJY4ryJ1uD3UrIjL3Ioo6fRLZ08CHKjIRHfowWJbpFHzQiUN9EB8F6YNlKMM5GRsozjnRDqpgkNgmze1Nts60KW2a5PdhyXaX3LTZmu8p5//P/3/fOffk/88hOoRlWf65QmGvAPsgYgGICBkBAIrMAJgBOUng1MCWLecmJyfLneTlWhPiuh5eIhMish9AsEO9RZJfBkSS6XzevisBpmn2LhSLhwG8LiKbOiS+PTlZAvBBXzB4PJVKLXcsoL7qcREZuRtiDyEXAyLPee1Gi4CYYeyoiHwrQKwb5C6ijI98KuM4E20FxHU9vARc6ja5W0QA2OXeCdX4YZpm7xI57iYn8CeBr0hevQu+6wTGCPzWMAgQWyLHTdPsbRGwUCwebv7mJE/Y+fwL91tWGEq9CNKuOxZAXiFwgcB5kBMA/qvHXCNwcLOuh+x8/nmSx905RWSkfrgbi7x56FLNp52attu27UuNsaXrfdc0bWh0dPSvZDJZa0rMWCx2n6Zp+ampqbmGPRQK3Yta7Z+mhZUCImY6n7cJAGHD+FREXmreQ+XzPZTL5S577W+nGBwcHKpVKv8220l+ZjvOy8qyLH+9yLSiWrXWQw4AIrK9jX2/ZVl+NVco7IVHhSNZgqZdWK8ATdN+IVnwcAXnCoW9SoB9bWKP5XK5lq27U2Sz2asQedPLJ8A+VW8sLfD5/V+vl7yBwKZN3rlELAUg0mwnWZqenk51S0A6nb5OcsrDFVGNltoEh6R0SwAAQGS2xURGFF3F6NZc2dJVcgAgW3ISUAqA1wntD4VCRre44/F4AB6fGkBeAfC8MCiRx7slYHlxcY+I9Hq4bEWRn72CRORVEVnzxtQJBHjNy06Riwrk+TZBuwZDoTfWSx7W9QMi8oSnkzyvggMD3wOY9xQh8n7YMI4NDw/33ClxIpFQYcM4JMDnbabMD4icaTSjkyLySl3Vhxr5a1XkLYjsAAAC0yC/UMCPyu+/nMlkrnll3LZt2z2lUmlYAQ/XRA5AxGwnkEqdtGdnDyoA8ImcIFkGAN4IzG8WeQTk7wAgwFYRSVRFzqyUy6cSiUTLXxcAFufnx1Gr/VCr1d5ZlZxc7hE5UV/cDYQNIykiR+rDos/v305yQ6Vc/sldFzSlnp2ZnT3llTgcDj8m1eq5dsQuAUnbcY4CriLUFwy+W7/ZAECwWi4nM5nM3wGRB0keAvCRIkc39vd/1y6xz+ebaOdzsU/0BYPv3Ry6fZFIZGt1ZeUigEEAVWraM7Ztn14zqQshXV8B4Gvjzmk9PSMzMzPTngIAIGoYOysip2+KIM8COEtgXoDQo3v2HB8bG6uuIqACQPMi95FPZh3nD7fRs9BEo9FYZWXlG4jsbPZt1vXe1d59IV2vorm/kFeUpj2dy+VaOqLnac5ms5n+YHCEZJLkbU+qxcVFzxg33S1elkm+vWHjxt1e5G0FAEAqlVq2HedoD7CdSn0MoAhyIR6PV1ZlJ+dALpD8xOf3P2A7zpF0Or20hui1Yel639DQ0MBa86LRaMw0zU5f0fgfUk/VbnmdnBIAAAAASUVORK5CYII=</Data>
+        \\    </Icon>
+        \\  </CustomIcons>
+        \\  <RecycleBinEnabled>True</RecycleBinEnabled>
+        \\  <RecycleBinUUID>AAAAAAAAAAAAAAAAAAAAAA==</RecycleBinUUID>
+        \\  <RecycleBinChanged>F7i13g4AAAA=</RecycleBinChanged>
+        \\  <EntryTemplatesGroup>AAAAAAAAAAAAAAAAAAAAAA==</EntryTemplatesGroup>
+        \\  <EntryTemplatesGroupChanged>F7i13g4AAAA=</EntryTemplatesGroupChanged>
+        \\  <LastSelectedGroup>AAAAAAAAAAAAAAAAAAAAAA==</LastSelectedGroup>
+        \\  <LastTopVisibleGroup>AAAAAAAAAAAAAAAAAAAAAA==</LastTopVisibleGroup>
+        \\  <HistoryMaxItems>10</HistoryMaxItems>
+        \\  <HistoryMaxSize>6291456</HistoryMaxSize>
+        \\  <SettingsChanged>F7i13g4AAAA=</SettingsChanged>
+        \\  <CustomData>
+        \\    <Item>
+        \\      <Key>KPXC_BROWSER_firefox-laptop</Key>
+        \\      <Value>eJQBp6tWf0IRQnAUErVyMGH1qKEY4wxYolAeWX+64xY=</Value>
+        \\      <LastModificationTime>49223g4AAAA=</LastModificationTime>
+        \\    </Item>
+        \\    <Item>
+        \\      <Key>_CREATED_firefox-laptop</Key>
+        \\      <Value>11/1/24 3:34 PM</Value>
+        \\      <LastModificationTime>49223g4AAAA=</LastModificationTime>
+        \\    </Item>
+        \\    <Item>
+        \\      <Key>_LAST_MODIFIED</Key>
+        \\      <Value>Fri Nov 1 14:51:00 2024 GMT</Value>
+        \\    </Item>
+        \\    <Item>
+        \\      <Key>KPXC_RANDOM_SLUG</Key>
+        \\      <Value>91991e15f08be61d9ef66e02434a4b4a6ad0885fc87f1ada9907a8ddeaac00e944f9b17ee26b87d392d8c4a46ba90ccc5328d2c2cf54c97863dfe0fe62898c86a01f0aec9bad632e030f9e707894f9df6fc061c641e25c6135b3a6f0bf5e6f3dae95d0c033a1731be55c1bfdf1b5fa60150ffc93591ec875abfb66763a3acff3324caeea798dd9c2</Value>
+        \\      <LastModificationTime>1OG23g4AAAA=</LastModificationTime>
+        \\    </Item>
+        \\    <Item>
+        \\      <Key>KPXC_DECRYPTION_TIME_PREFERENCE</Key>
+        \\      <Value>1000</Value>
+        \\      <LastModificationTime>4bi13g4AAAA=</LastModificationTime>
+        \\    </Item>
+        \\  </CustomData>
+        \\</Meta>
+        \\
+    ;
+
+    var icons = std.ArrayList(Icon).init(allocator);
+    try icons.append(.{
+        .uuid = try Uuid.urn.deserialize("ba5c5602-21dc-464e-ab87-014d487a74c1"),
+        .last_modification_time = 0x0edeb5b980,
+        .data = try allocator.dupe(u8, "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x20\x00\x00\x00\x20\x08\x06\x00\x00\x00\x73\x7a\x7a\xf4\x00\x00\x00\x09\x70\x48\x59\x73\x00\x00\x0e\xc4\x00\x00\x0e\xc4\x01\x95\x2b\x0e\x1b\x00\x00\x00\x12\x74\x45\x58\x74\x5f\x71\x5f\x69\x63\x6f\x4f\x72\x69\x67\x44\x65\x70\x74\x68\x00\x33\x32\xd5\xe2\xb8\xec\x00\x00\x04\x97\x49\x44\x41\x54\x58\x85\xad\x57\x51\x68\x5b\x55\x18\xfe\xbe\x73\xd3\x34\xdb\xda\x48\xd9\xee\x4d\x9a\x64\x25\x8e\x2b\xc8\x9d\x6e\x0f\x75\x2b\x22\x32\xf7\x22\x8a\x3a\x7d\x12\xd9\xd3\xc0\x87\x2a\x32\x11\x1d\xfa\x30\x58\x96\xe9\x14\x7c\xd0\x89\x43\x7d\x10\x1f\x05\xe9\x83\x65\x28\xc3\x39\x19\x1b\x28\xce\x39\xd1\x0e\xaa\x60\x90\xd8\x26\xcd\xed\x4d\xb6\xce\xb4\x29\x6d\x9a\xe4\xf7\x61\xc9\x76\x97\xdc\xb4\xd9\x9a\xef\x29\xe7\xff\xcf\xff\x7f\xdf\x39\xf7\xe4\xff\xcf\x21\x3a\x84\x65\x59\xfe\xb9\x42\x61\xaf\x00\xfb\x20\x62\x01\x88\x08\x19\x01\x00\x8a\xcc\x00\x98\x01\x39\x49\xe0\xd4\xc0\x96\x2d\xe7\x26\x27\x27\xcb\x9d\xe4\xe5\x5a\x13\xe2\xba\x1e\x5e\x22\x13\x22\xb2\x1f\x40\xb0\x43\xbd\x45\x92\x5f\x06\x44\x92\xe9\x7c\xde\xbe\x2b\x01\xa6\x69\xf6\x2e\x14\x8b\x87\x01\xbc\x2e\x22\x9b\x3a\x24\xbe\x3d\x39\x59\x02\xf0\x41\x5f\x30\x78\x3c\x95\x4a\x2d\x77\x2c\xa0\xbe\xea\x71\x11\x19\xb9\x1b\x62\x0f\x21\x17\x03\x22\xcf\x79\xed\x46\x8b\x80\x98\x61\xec\xa8\x88\x7c\x2b\x40\xac\x1b\xe4\x2e\xa2\x8c\x8f\x7c\x2a\xe3\x38\x13\x6d\x05\xc4\x75\x3d\xbc\x04\x5c\xea\x36\xb9\x5b\x44\x00\xd8\xe5\xde\x09\xd5\xf8\x61\x9a\x66\xef\x12\x39\xee\x26\x27\xf0\x27\x81\xaf\x48\x5e\xbd\x0b\xbe\xeb\x04\xc6\x08\xfc\xd6\x30\x08\x10\x5b\x22\xc7\x4d\xd3\xec\x6d\x11\xb0\x50\x2c\x1e\x6e\xfe\xe6\x24\x4f\xd8\xf9\xfc\x0b\xf7\x5b\x56\x18\x4a\xbd\x08\xd2\xae\x3b\x16\x40\x5e\x21\x70\x81\xc0\x79\x90\x13\x00\xfe\xab\xc7\x5c\x23\x70\x70\xb3\xae\x87\xec\x7c\xfe\x79\x92\xc7\xdd\x39\x45\x64\xa4\x7e\xb8\x1b\x8b\xbc\x79\xe8\x52\xcd\xa7\x9d\x9a\xb6\xdb\xb6\xed\x4b\x8d\xb1\xa5\xeb\x7d\xd7\x34\x6d\x68\x74\x74\xf4\xaf\x64\x32\x59\x6b\x4a\xcc\x58\x2c\x76\x9f\xa6\x69\xf9\xa9\xa9\xa9\xb9\x86\x3d\x14\x0a\xdd\x8b\x5a\xed\x9f\xa6\x85\x95\x02\x22\x66\x3a\x9f\xb7\x09\x00\x61\xc3\xf8\x54\x44\x5e\x6a\xde\x43\xe5\xf3\x3d\x94\xcb\xe5\x2e\x7b\xed\x6f\xa7\x18\x1c\x1c\x1c\xaa\x55\x2a\xff\x36\xdb\x49\x7e\x66\x3b\xce\xcb\xca\xb2\x2c\x7f\xbd\xc8\xb4\xa2\x5a\xb5\xd6\x43\x0e\x00\x22\xb2\xbd\x8d\x7d\xbf\x65\x59\x7e\x35\x57\x28\xec\x85\x47\x85\x23\x59\x82\xa6\x5d\x58\xaf\x00\x4d\xd3\x7e\x21\x59\xf0\x70\x05\xe7\x0a\x85\xbd\x4a\x80\x7d\x6d\x62\x8f\xe5\x72\xb9\x96\xad\xbb\x53\x64\xb3\xd9\xab\x10\x79\xd3\xcb\x27\xc0\x3e\x55\x6f\x2c\x2d\xf0\xf9\xfd\x5f\xaf\x97\xbc\x81\xc0\xa6\x4d\xde\xb9\x44\x2c\x05\x20\xd2\x6c\x27\x59\x9a\x9e\x9e\x4e\x75\x4b\x40\x3a\x9d\xbe\x4e\x72\xca\xc3\x15\x51\x8d\x96\xda\x04\x87\xa4\x74\x4b\x00\x00\x40\x64\xb6\xc5\x44\x46\x14\x5d\xc5\xe8\xd6\x5c\xd9\xd2\x55\x72\x00\x20\x5b\x72\x12\x50\x0a\x80\xd7\x09\xed\x0f\x85\x42\x46\xb7\xb8\xe3\xf1\x78\x00\x1e\x9f\x1a\x40\x5e\x01\xf0\xbc\x30\x28\x91\xc7\xbb\x25\x60\x79\x71\x71\x8f\x88\xf4\x7a\xb8\x6c\x45\x91\x9f\xbd\x82\x44\xe4\x55\x11\x59\xf3\xc6\xd4\x09\x04\x78\xcd\xcb\x4e\x91\x8b\x0a\xe4\xf9\x36\x41\xbb\x06\x43\xa1\x37\xd6\x4b\x1e\xd6\xf5\x03\x22\xf2\x84\xa7\x93\x3c\xaf\x82\x03\x03\xdf\x03\x98\xf7\x14\x21\xf2\x7e\xd8\x30\x8e\x0d\x0f\x0f\xf7\xdc\x29\x71\x22\x91\x50\x61\xc3\x38\x24\xc0\xe7\x6d\xa6\xcc\x0f\x88\x9c\x69\x34\xa3\x93\x22\xf2\x4a\x5d\xd5\x87\x1a\xf9\x6b\x55\xe4\x2d\x88\xec\x00\x00\x02\xd3\x20\xbf\x50\xc0\x8f\xca\xef\xbf\x9c\xc9\x64\xae\x79\x65\xdc\xb6\x6d\xdb\x3d\xa5\x52\x69\x58\x01\x0f\xd7\x44\x0e\x40\xc4\x6c\x27\x90\x4a\x9d\xb4\x67\x67\x0f\x2a\x00\xf0\x89\x9c\x20\x59\x06\x00\xde\x08\xcc\x6f\x16\x79\x04\xe4\xef\x00\x20\xc0\x56\x11\x49\x54\x45\xce\xac\x94\xcb\xa7\x12\x89\x44\xcb\x5f\x17\x00\x16\xe7\xe7\xc7\x51\xab\xfd\x50\xab\xd5\xde\x59\x95\x9c\x5c\xee\x11\x39\x51\x5f\xdc\x0d\x84\x0d\x23\x29\x22\x47\xea\xc3\xa2\xcf\xef\xdf\x4e\x72\x43\xa5\x5c\xfe\xc9\x5d\x17\x34\xa5\x9e\x9d\x99\x9d\x3d\xe5\x95\x38\x1c\x0e\x3f\x26\xd5\xea\xb9\x76\xc4\x2e\x01\x49\xdb\x71\x8e\x02\xae\x22\xd4\x17\x0c\xbe\x5b\xbf\xd9\x00\x40\xb0\x5a\x2e\x27\x33\x99\xcc\xdf\x01\x91\x07\x49\x1e\x02\xf0\x91\x22\x47\x37\xf6\xf7\x7f\xd7\x2e\xb1\xcf\xe7\x9b\x68\xe7\x73\xb1\x4f\xf4\x05\x83\xef\xdd\x1c\xba\x7d\x91\x48\x64\x6b\x75\x65\xe5\x22\x80\x41\x00\x55\x6a\xda\x33\xb6\x6d\x9f\x5e\x33\xa9\x0b\x21\x5d\x5f\x01\xe0\x6b\xe3\xce\x69\x3d\x3d\x23\x33\x33\x33\xd3\x9e\x02\x00\x20\x6a\x18\x3b\x2b\x22\xa7\x6f\x8a\x20\xcf\x02\x38\x4b\x60\x5e\x80\xd0\xa3\x7b\xf6\x1c\x1f\x1b\x1b\xab\xae\x22\xa0\x02\x40\xf3\x22\xf7\x91\x4f\x66\x1d\xe7\x0f\xb7\xd1\xb3\xd0\x44\xa3\xd1\x58\x65\x65\xe5\x1b\x88\xec\x6c\xf6\x6d\xd6\xf5\xde\xd5\xde\x7d\x21\x5d\xaf\xa2\xb9\xbf\x90\x57\x94\xa6\x3d\x9d\xcb\xe5\x5a\x3a\xa2\xe7\x69\xce\x66\xb3\x99\xfe\x60\x70\x84\x64\x92\xe4\x6d\x4f\xaa\xc5\xc5\x45\xcf\x18\x37\xdd\x2d\x5e\x96\x49\xbe\xbd\x61\xe3\xc6\xdd\x5e\xe4\x6d\x05\x00\x40\x2a\x95\x5a\xb6\x1d\xe7\x68\x0f\xb0\x9d\x4a\x7d\x0c\xa0\x08\x72\x21\x1e\x8f\x57\x56\x65\x27\xe7\x40\x2e\x90\xfc\xc4\xe7\xf7\x3f\x60\x3b\xce\x91\x74\x3a\xbd\xb4\x86\xe8\xb5\x61\xe9\x7a\xdf\xd0\xd0\xd0\xc0\x5a\xf3\xa2\xd1\x68\xcc\x34\xcd\x4e\x5f\xd1\xf8\x1f\x52\x4f\xd5\x6e\x79\x9d\x9c\x12\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82"),
+    });
+
+    var data = std.ArrayList(KeyValue).init(allocator);
+    try data.append(.{
+        .key = try allocator.dupe(u8, "KPXC_BROWSER_firefox-laptop"),
+        .value = try allocator.dupe(u8, "eJQBp6tWf0IRQnAUErVyMGH1qKEY4wxYolAeWX+64xY="),
+        .last_modification_time = 0x0edeb6dde3,
+    });
+    try data.append(.{
+        .key = try allocator.dupe(u8, "_CREATED_firefox-laptop"),
+        .value = try allocator.dupe(u8, "11/1/24 3:34 PM"),
+        .last_modification_time = 0x0edeb6dde3,
+    });
+    try data.append(.{
+        .key = try allocator.dupe(u8, "_LAST_MODIFIED"),
+        .value = try allocator.dupe(u8, "Fri Nov 1 14:51:00 2024 GMT"),
+    });
+    try data.append(.{
+        .key = try allocator.dupe(u8, "KPXC_RANDOM_SLUG"),
+        .value = try allocator.dupe(u8, "91991e15f08be61d9ef66e02434a4b4a6ad0885fc87f1ada9907a8ddeaac00e944f9b17ee26b87d392d8c4a46ba90ccc5328d2c2cf54c97863dfe0fe62898c86a01f0aec9bad632e030f9e707894f9df6fc061c641e25c6135b3a6f0bf5e6f3dae95d0c033a1731be55c1bfdf1b5fa60150ffc93591ec875abfb66763a3acff3324caeea798dd9c2"),
+        .last_modification_time = 0x0edeb6e1d4,
+    });
+    try data.append(.{
+        .key = try allocator.dupe(u8, "KPXC_DECRYPTION_TIME_PREFERENCE"),
+        .value = try allocator.dupe(u8, "1000"),
+        .last_modification_time = 0x0edeb5b8e1,
+    });
+
+    var meta = Meta{
+        .generator = try allocator.dupe(u8, "KeePassXC"),
+        .database_name = try allocator.dupe(u8, "Zig Database Impl"),
+        .database_name_changed = 0x0edeb5b8d4,
+        .database_description = try allocator.dupe(u8, "This is another test database for the KDBX4 Zig impl"),
+        .database_description_changed = 0x0edeb5b8d4,
+        .default_user_name_changed = 0x0edeb5b817,
+        .maintenance_history_days = 365,
+        .master_key_changed = 0x0edeb5b912,
+        .master_key_change_rec = -1,
+        .master_key_change_force = -1,
+        .memory_protection = .{},
+        .custom_icons = icons,
+        .recycle_bin_enabled = true,
+        .recycle_bin_uuid = 0,
+        .recycle_bin_changed = 0x0edeb5b817,
+        .entry_template_group = 0,
+        .entry_template_group_changed = 0x0edeb5b817,
+        .last_selected_group = 0,
+        .last_top_visible_group = 0,
+        .history_max_items = 10,
+        .history_max_size = 6291456,
+        .settings_changed = 0x0edeb5b817,
+        .custom_data = data,
+        .allocator = allocator,
+    };
+    defer meta.deinit();
+
+    var out = std.ArrayList(u8).init(std.testing.allocator);
+    defer out.deinit();
+
+    try meta.toXml(out.writer(), 0);
 
     //std.debug.print("{s}\n", .{out.items});
 
