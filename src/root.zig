@@ -28,7 +28,13 @@ pub const Header = struct {
         .{ 0xB54BFB67, 4 }, // signature and major version
     };
 
-    pub fn writeHeader(self: *const @This(), out: anytype) !void {
+    // Call this function after changing the version or one of the
+    // header fields.
+    pub fn updateRawHeader(self: *@This()) !void {
+        var out_ = std.ArrayList(u8).init(self.allocator);
+        errdefer out_.deinit();
+        var out = out_.writer();
+
         try self.version.write(out);
 
         for (self.fields[0..]) |field_| {
@@ -134,6 +140,21 @@ pub const Header = struct {
 
         // End of Heder
         try out.writeAll("\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a");
+
+        const raw_header = try out_.toOwnedSlice();
+        self.allocator.free(self.raw_header);
+        self.raw_header = raw_header;
+    }
+
+    pub fn updateHash(self: *@This()) !void {
+        std.crypto.hash.sha2.Sha256.hash(self.raw_header, &self.hash, .{});
+    }
+
+    pub fn updateMac(self: *@This(), keys: *const Keys) void {
+        self.mac = keys.calculateMac(
+            &.{self.raw_header},
+            0xffffffffffffffff,
+        );
     }
 
     pub fn readAlloc(reader: anytype, allocator: Allocator) !@This() {
@@ -356,6 +377,25 @@ pub const Keys = struct {
         h.final(&k);
 
         return k;
+    }
+
+    pub fn calculateMac(
+        self: *const @This(),
+        data: []const []const u8,
+        index: u64,
+    ) [32]u8 {
+        var k = self.getBlockKey(index);
+        defer std.crypto.utils.secureZero(u8, &k);
+
+        const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
+        var mac: [HmacSha256.mac_length]u8 = undefined;
+        var ctx = HmacSha256.init(&k);
+        for (data) |d| {
+            ctx.update(d);
+        }
+        ctx.final(&mac);
+
+        return mac;
     }
 
     pub fn checkMac(
@@ -2009,15 +2049,12 @@ test "decode and encode header #1" {
 
     var fbs = std.io.fixedBufferStream(s);
 
-    const header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
+    var header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
     defer header.deinit();
 
-    var new_header = std.ArrayList(u8).init(std.testing.allocator);
-    defer new_header.deinit();
+    try header.updateRawHeader();
 
-    try header.writeHeader(new_header.writer());
-
-    try std.testing.expectEqualSlices(u8, s2, new_header.items);
+    try std.testing.expectEqualSlices(u8, s2, header.raw_header);
 }
 
 const db = @embedFile("static/testdb.kdbx");
@@ -2033,6 +2070,29 @@ test "verify kdbx4 header mac (positive test)" {
     defer keys.deinit();
 
     try header.checkMac(&keys);
+}
+
+test "recalculate raw header, hash, and mac #1" {
+    var fbs = std.io.fixedBufferStream(db);
+
+    var header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
+    defer header.deinit();
+
+    const hash = header.hash;
+    const mac = header.mac;
+
+    var keys = try header.deriveKeys("supersecret", null, null);
+    defer keys.deinit();
+
+    header.hash = .{0} ** 32;
+    header.mac = .{0} ** 32;
+
+    try header.updateRawHeader();
+    try header.updateHash();
+    header.updateMac(&keys);
+
+    try std.testing.expectEqualSlices(u8, &hash, &header.hash);
+    try std.testing.expectEqualSlices(u8, &mac, &header.mac);
 }
 
 test "verify kdbx4 header mac (negative test)" {
