@@ -260,9 +260,25 @@ pub fn serializeDb(
             written += to_write;
             i += 1;
         }
-    }
 
-    try out_.appendSlice("\x00\x00\x00\x00");
+        // The file is terminated by an empty block. Why is this important?!?
+        // FUCK WHO KNOWS but KeePassXC and other applications expect it :|
+        {
+            var raw_block_index: [8]u8 = .{0} ** 8;
+            std.mem.writeInt(u64, &raw_block_index, i, .little);
+            var raw_block_len: [4]u8 = .{0} ** 4;
+            std.mem.writeInt(u32, &raw_block_len, 0, .little);
+
+            const mac = keys.calculateMac(&.{
+                &raw_block_index,
+                &raw_block_len,
+                "",
+            }, i);
+
+            try out.writeAll(&mac);
+            try out.writeAll(&raw_block_len);
+        }
+    }
 
     return try out_.toOwnedSlice();
 }
@@ -747,6 +763,9 @@ pub const Body = struct {
             // Break if length is less than 1MiB
             if (len < 1048576) break;
         }
+
+        std.log.err("len before decryption: {d}\n", .{inner.items.len});
+        std.log.err("{s}\n", .{std.fmt.fmtSliceHexLower(inner.items)});
 
         const iv = header.getEncryptionIv();
         switch (header.getCipherId()) {
