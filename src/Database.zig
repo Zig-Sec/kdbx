@@ -10,6 +10,7 @@ const misc = @import("misc.zig");
 const decode = misc.decode;
 const encode = misc.encode;
 const encode2 = misc.encode2;
+const currTime = misc.currTime;
 
 const v4 = @import("v4.zig");
 const Field = v4.Field;
@@ -28,9 +29,6 @@ const InnerHeader = v4.InnerHeader;
 const Body = v4.Body;
 
 pub const DatabaseKey = @import("DatabaseKey.zig");
-
-// Why not just use fucking EPOCH
-const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
 
 header: Header,
 inner_header: InnerHeader,
@@ -345,8 +343,4 @@ pub fn save(self: *@This(), db_key: DatabaseKey, allocator: Allocator) ![]const 
     }
 
     return try out_.toOwnedSlice();
-}
-
-fn currTime() i64 {
-    return std.time.timestamp() + TIME_DIFF_KDBX_EPOCH_IN_SEC;
 }

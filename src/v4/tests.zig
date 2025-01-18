@@ -909,11 +909,22 @@ test "serialize Meta #1" {
 test "create new database #1" {
     const allocator = std.testing.allocator;
 
-    const database = try Database.newDatabase(.{
-        .password = "1234",
+    var database = try Database.new(.{
         .allocator = allocator,
     });
-    defer allocator.free(database);
+    defer database.deinit();
+
+    const db_key = DatabaseKey{
+        .password = try allocator.dupe(u8, "1234"),
+        .allocator = allocator,
+    };
+    defer db_key.deinit();
+
+    const raw = try database.save(
+        db_key,
+        allocator,
+    );
+    defer allocator.free(raw);
 
     //    var file = try std.fs.cwd().createFile("foo.kdbx", .{});
     //    defer file.close();
@@ -922,28 +933,14 @@ test "create new database #1" {
     //
     //    // ------------------------------------
     //
-    var fbs = std.io.fixedBufferStream(database);
+    var fbs = std.io.fixedBufferStream(raw);
     const reader = fbs.reader();
 
-    const header = try Header.readAlloc(reader, std.testing.allocator);
-    defer header.deinit();
+    var database2 = try Database.open(reader, .{
+        .allocator = allocator,
+        .key = db_key,
+    });
+    defer database2.deinit();
 
-    var db_key = DatabaseKey{
-        .password = try std.testing.allocator.dupe(u8, "1234"),
-        .allocator = std.testing.allocator,
-    };
-    defer db_key.deinit();
-    var keys = try header.deriveKeys(db_key);
-    defer keys.deinit();
-    try header.checkMac(&keys);
-
-    var body = try Body.readAlloc(reader, &header, &keys, std.testing.allocator);
-    defer body.deinit();
-
-    try std.testing.expectEqual(InnerHeader.StreamCipher.ChaCha20, body.inner_header.stream_cipher);
-
-    //std.debug.print("{s}\n", .{body.xml});
-
-    const body_xml = try body.getXml(std.testing.allocator);
-    defer body_xml.deinit();
+    try std.testing.expectEqual(InnerHeader.StreamCipher.ChaCha20, database2.inner_header.stream_cipher);
 }

@@ -1,3 +1,8 @@
+const std = @import("std");
+
+// Why not just use fucking EPOCH
+const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
+
 pub fn decode(T: type, arr: anytype) T {
     const bytes = @typeInfo(T).Int.bits / 8;
     var tmp: T = 0;
@@ -27,4 +32,8 @@ pub fn encode2(out: anytype, l: usize, v: anytype) !void {
         try out.writeByte(@as(u8, @intCast(v2 & 0xff)));
         v2 >>= 8;
     }
+}
+
+pub fn currTime() i64 {
+    return std.time.timestamp() + TIME_DIFF_KDBX_EPOCH_IN_SEC;
 }
