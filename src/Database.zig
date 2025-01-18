@@ -27,7 +27,7 @@ const Icon = v4.Icon;
 const InnerHeader = v4.InnerHeader;
 const Body = v4.Body;
 
-const DatabaseKey = @import("DatabaseKey.zig");
+pub const DatabaseKey = @import("DatabaseKey.zig");
 
 // Why not just use fucking EPOCH
 const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
@@ -39,6 +39,14 @@ allocator: Allocator,
 
 pub const OpenOptions = struct {
     key: DatabaseKey,
+    allocator: Allocator,
+};
+
+pub const NewDatabaseOptions = struct {
+    generator: []const u8 = "KDBX4-Zig",
+    name: []const u8 = "Database",
+    description: []const u8 = "",
+    encryption_algorithm: Field.Cipher = .aes256_cbc,
     allocator: Allocator,
 };
 
@@ -82,16 +90,7 @@ pub fn open(reader: anytype, options: OpenOptions) !@This() {
     };
 }
 
-pub const DatabaseOptions = struct {
-    generator: []const u8 = "Zig KDBX4 Parser",
-    name: []const u8 = "Database",
-    description: []const u8 = "",
-    encryption_algorithm: Field.Cipher = .aes256_cbc,
-    password: []const u8,
-    allocator: Allocator,
-};
-
-pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
+pub fn new(options: NewDatabaseOptions) !@This() {
     // Outer Header
     var header = Header{
         .version = HVersion.new(0x9AA2D903, 0xB54BFB67, 1, 4),
@@ -101,7 +100,7 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         .mac = .{0} ** 32,
         .allocator = options.allocator,
     };
-    defer header.deinit();
+    errdefer header.deinit();
 
     header.fields[0] = .{ .cipher_id = options.encryption_algorithm };
     header.fields[1] = .{ .compression = Field.Compression.gzip };
@@ -130,16 +129,6 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         },
     };
 
-    var db_key = DatabaseKey{
-        .password = try options.allocator.dupe(u8, options.password),
-        .allocator = options.allocator,
-    };
-    defer db_key.deinit();
-    var keys = try header.deriveKeys(db_key);
-    try header.updateRawHeader();
-    header.updateHash();
-    header.updateMac(&keys);
-
     // Inner Header
     const stream_key = try options.allocator.alloc(u8, 64);
     std.crypto.random.bytes(stream_key);
@@ -149,7 +138,7 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         .binary = std.ArrayList([]u8).init(options.allocator),
         .allocator = options.allocator,
     };
-    defer inner_header.deinit();
+    errdefer inner_header.deinit();
 
     // DB
     const t = currTime();
@@ -179,7 +168,7 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         .custom_data = std.ArrayList(KeyValue).init(options.allocator),
         .allocator = options.allocator,
     };
-    defer meta.deinit();
+    errdefer meta.deinit();
 
     var group = Group{
         .uuid = Uuid.v4.new(),
@@ -205,48 +194,48 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         .groups = std.ArrayList(Group).init(options.allocator),
         .allocator = options.allocator,
     };
-    defer group.deinit();
+    errdefer group.deinit();
 
-    var xml_ = XML{
+    const xml_ = XML{
         .meta = meta,
         .root = group,
     };
 
-    return try serializeDb(
-        &header,
-        &inner_header,
-        &xml_,
-        &keys,
-        options.allocator,
-    );
+    return .{
+        .header = header,
+        .inner_header = inner_header,
+        .body = xml_,
+        .allocator = options.allocator,
+    };
 }
 
-pub fn serializeDb(
-    header: *Header,
-    inner_header: *InnerHeader,
-    xml_: *XML,
-    keys: *Keys,
-    allocator: Allocator,
-) ![]const u8 {
+pub fn save(self: *@This(), db_key: DatabaseKey, allocator: Allocator) ![]const u8 {
+    var keys = try self.header.deriveKeys(db_key);
+    try self.header.updateRawHeader();
+    self.header.updateHash();
+    self.header.updateMac(&keys);
+
+    // --------------------------------------------------
+
     var out_ = std.ArrayList(u8).init(allocator);
     errdefer out_.deinit();
     var out = out_.writer();
 
-    try out.writeAll(header.raw_header);
-    try out.writeAll(&header.hash);
-    try out.writeAll(&header.mac);
+    try out.writeAll(self.header.raw_header);
+    try out.writeAll(&self.header.hash);
+    try out.writeAll(&self.header.mac);
 
     {
         var inner_ = std.ArrayList(u8).init(allocator);
         defer inner_.deinit();
         const inner = inner_.writer();
 
-        try inner_header.write(inner);
+        try self.inner_header.write(inner);
 
         //std.debug.print("inner header: {s}", .{std.fmt.fmtSliceHexLower(inner_.items)});
 
         var digest: [64]u8 = .{0} ** 64;
-        std.crypto.hash.sha2.Sha512.hash(inner_header.stream_key, &digest, .{});
+        std.crypto.hash.sha2.Sha512.hash(self.inner_header.stream_key, &digest, .{});
 
         var cipher = ChaCha20.init(
             0,
@@ -254,9 +243,9 @@ pub fn serializeDb(
             digest[32..44].*,
         );
 
-        try xml_.toXml(inner, &cipher);
+        try self.body.toXml(inner, &cipher);
 
-        if (header.getCompression() == .gzip) {
+        if (self.header.getCompression() == .gzip) {
             var in_stream = std.io.fixedBufferStream(inner_.items);
             var compressed = std.ArrayList(u8).init(allocator);
             errdefer compressed.deinit();
@@ -273,8 +262,8 @@ pub fn serializeDb(
 
         //std.debug.print("{s}\n", .{std.fmt.fmtSliceHexLower(inner_.items)});
 
-        const iv = header.getEncryptionIv();
-        switch (header.getCipherId()) {
+        const iv = self.header.getEncryptionIv();
+        switch (self.header.getCipherId()) {
             .aes128_cbc, .twofish_cbc, .chacha20 => {
                 return error.UnsupportedCipher;
             },
@@ -334,7 +323,10 @@ pub fn serializeDb(
         }
 
         // The file is terminated by an empty block. Why is this important?!?
-        // FUCK WHO KNOWS but KeePassXC and other applications expect it :|
+        // FUCK WHO KNOWS but KeePassXC and other applications expect it :|.
+        // Instead, the header should encode the block length and the parser
+        // is expected to stop if a block is less than the defined block length...
+        // ... but whom be I to judge ...
         {
             var raw_block_index: [8]u8 = .{0} ** 8;
             std.mem.writeInt(u64, &raw_block_index, i, .little);

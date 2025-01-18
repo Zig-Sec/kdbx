@@ -5,14 +5,25 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
 pub fn main() !void {
-    const database = try kdbx.Database.newDatabase(.{
-        .password = "1234",
+    var database = try kdbx.Database.new(.{
         .allocator = allocator,
     });
-    defer allocator.free(database);
+    defer database.deinit();
 
-    var file = try std.fs.cwd().createFile("foo.kdbx", .{});
+    const db_key = kdbx.DatabaseKey{
+        .password = try allocator.dupe(u8, "1234"),
+        .allocator = allocator,
+    };
+    defer db_key.deinit();
+
+    const raw = try database.save(
+        db_key,
+        allocator,
+    );
+    defer allocator.free(raw);
+
+    var file = try std.fs.cwd().createFile("db.kdbx", .{});
     defer file.close();
 
-    try file.writeAll(database);
+    try file.writeAll(raw);
 }
