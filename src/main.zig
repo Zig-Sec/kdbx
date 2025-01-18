@@ -1,24 +1,38 @@
 const std = @import("std");
+const kdbx = @import("kdbx");
+
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    const database = try kdbx.newDatabase(.{
+        .password = "1234",
+        .allocator = allocator,
+    });
+    defer allocator.free(database);
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var file = try std.fs.cwd().createFile("foo.kdbx", .{});
+    defer file.close();
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    try file.writeAll(database);
 
-    try bw.flush(); // don't forget to flush!
-}
+    // ------------------------------------
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+    var fbs = std.io.fixedBufferStream(database);
+    const reader = fbs.reader();
+
+    const header = try kdbx.Header.readAlloc(reader, allocator);
+    defer header.deinit();
+
+    var keys = try header.deriveKeys("1234", null, null);
+    defer keys.deinit();
+    try header.checkMac(&keys);
+
+    var body = try kdbx.Body.readAlloc(reader, &header, &keys, allocator);
+    defer body.deinit();
+
+    //std.debug.print("{s}\n", .{body.xml});
+
+    const body_xml = try body.getXml(allocator);
+    defer body_xml.deinit();
 }
