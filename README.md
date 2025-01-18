@@ -1,4 +1,4 @@
-# KDBX - Keypass Database XML
+# KDBX - Keepass Database XML
 
 This Zig module allows you to integrate KDBX support into your application.
 
