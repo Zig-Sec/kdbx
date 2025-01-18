@@ -10,6 +10,14 @@ pub fn main() !void {
     });
     defer database.deinit();
 
+    var entry1 = kdbx.Entry.new(allocator);
+    try entry1.set("Title", "Demo Entry", false);
+    try entry1.set("UserName", "max", false);
+    try entry1.set("Password", "supersecret", true);
+    errdefer entry1.deinit();
+
+    try database.body.root.addEntry(entry1);
+
     const db_key = kdbx.DatabaseKey{
         .password = try allocator.dupe(u8, "1234"),
         .allocator = allocator,

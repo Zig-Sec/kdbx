@@ -10,6 +10,9 @@ const ChaCha20 = @import("../chacha.zig").ChaCha20;
 const v4 = @import("../v4.zig");
 const Body = v4.Body;
 
+const misc = @import("../misc.zig");
+const currTime = misc.currTime;
+
 const XML_INDENT = 2;
 
 const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
@@ -448,6 +451,15 @@ pub const Group = struct {
     groups: std.ArrayList(Group),
     allocator: Allocator,
 
+    pub fn addEntry(self: *@This(), entry: Entry) !void {
+        for (0..self.entries.items.len) |i| {
+            if (self.entries.items[i].uuid == entry.uuid)
+                return error.EntryAlreadyExists;
+        }
+
+        try self.entries.append(entry);
+    }
+
     pub fn toXml(
         self: *const @This(),
         out: anytype,
@@ -587,6 +599,16 @@ pub const Entry = struct {
     auto_type: ?AutoType = null,
     history: ?std.ArrayList(Entry) = null,
     allocator: Allocator,
+
+    pub fn new(allocator: Allocator) @This() {
+        return .{
+            .uuid = Uuid.v4.new(),
+            .icon_id = 0,
+            .times = Times.new(),
+            .strings = std.ArrayList(KeyValue).init(allocator),
+            .allocator = allocator,
+        };
+    }
 
     pub fn get(self: *const @This(), key: []const u8) ?[]u8 {
         for (self.strings.items) |kv| {
@@ -733,6 +755,19 @@ pub const Times = struct {
     expires: bool,
     usage_count: i64,
     location_changed: i64,
+
+    pub fn new() @This() {
+        const curr = currTime();
+        return .{
+            .last_modification_time = curr,
+            .creation_time = curr,
+            .last_access_time = curr,
+            .expiry_time = curr,
+            .expires = false,
+            .usage_count = 0,
+            .location_changed = curr,
+        };
+    }
 
     pub fn toXml(
         self: *const @This(),
