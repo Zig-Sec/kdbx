@@ -11,6 +11,80 @@ const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
 
 const XML_INDENT = 2;
 
+pub const Database = struct {
+    header: Header,
+    inner_header: InnerHeader,
+    body: XML,
+    allocator: Allocator,
+
+    pub const OpenOptions = struct {
+        key: DatabaseKey,
+        allocator: Allocator,
+    };
+
+    pub fn deinit(self: *const @This()) void {
+        self.header.deinit();
+        self.inner_header.deinit();
+        self.body.deinit();
+    }
+
+    pub fn open(reader: anytype, options: OpenOptions) !@This() {
+        const header = try Header.readAlloc(
+            reader,
+            options.allocator,
+        );
+        errdefer header.deinit();
+
+        var keys = try header.deriveKeys(options.key);
+        defer keys.deinit();
+
+        try header.checkMac(&keys);
+
+        var body = try Body.readAlloc(
+            reader,
+            &header,
+            &keys,
+            options.allocator,
+        );
+        defer {
+            std.crypto.utils.secureZero(u8, body.xml);
+            body.allocator.free(body.xml);
+        }
+
+        const body_xml = try body.getXml(options.allocator);
+        errdefer body_xml.deinit();
+
+        return .{
+            .header = header,
+            .inner_header = body.inner_header,
+            .body = body_xml,
+            .allocator = options.allocator,
+        };
+    }
+};
+
+pub const DatabaseKey = struct {
+    password: ?[]u8 = null,
+    keyfile: ?[]u8 = null,
+    keyprovider: ?[]u8 = null,
+    allocator: Allocator,
+
+    pub fn deinit(self: *const @This()) void {
+        if (self.password) |d| {
+            std.crypto.utils.secureZero(u8, d);
+            self.allocator.free(d);
+        }
+        if (self.keyfile) |d| {
+            std.crypto.utils.secureZero(u8, d);
+            self.allocator.free(d);
+        }
+        if (self.keyprovider) |d| {
+            std.crypto.utils.secureZero(u8, d);
+            self.allocator.free(d);
+        }
+    }
+};
+
 pub const DatabaseOptions = struct {
     generator: []const u8 = "Zig KDBX4 Parser",
     name: []const u8 = "Database",
@@ -59,11 +133,12 @@ pub fn newDatabase(options: DatabaseOptions) ![]const u8 {
         },
     };
 
-    var keys = try header.deriveKeys(
-        options.password,
-        null,
-        null,
-    );
+    var db_key = DatabaseKey{
+        .password = try options.allocator.dupe(u8, options.password),
+        .allocator = options.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     try header.updateRawHeader();
     header.updateHash();
     header.updateMac(&keys);
@@ -573,22 +648,20 @@ pub const Header = struct {
     /// Derive the encryption and mac key.
     pub fn deriveKeys(
         self: *const @This(),
-        pw: ?[]const u8,
-        keyfile: ?[]const u8,
-        keyprovider: ?[]const u8,
+        database_key: DatabaseKey,
     ) !Keys {
         // Create composite key
         var composite_key: [32]u8 = .{0} ** 32;
         defer std.crypto.utils.secureZero(u8, &composite_key);
         var h = std.crypto.hash.sha2.Sha256.init(.{});
-        if (pw) |password| {
+        if (database_key.password) |password| {
             var pwhash: [32]u8 = .{0} ** 32;
             defer std.crypto.utils.secureZero(u8, &pwhash);
             std.crypto.hash.sha2.Sha256.hash(password, &pwhash, .{});
             h.update(&pwhash);
         }
-        if (keyfile) |kf| h.update(kf);
-        if (keyprovider) |kp| h.update(kp);
+        if (database_key.keyfile) |kf| h.update(kf);
+        if (database_key.keyprovider) |kp| h.update(kp);
         h.final(&composite_key);
 
         // Generate pre-key
@@ -764,9 +837,6 @@ pub const Body = struct {
             if (len < 1048576) break;
         }
 
-        std.log.err("len before decryption: {d}\n", .{inner.items.len});
-        std.log.err("{s}\n", .{std.fmt.fmtSliceHexLower(inner.items)});
-
         const iv = header.getEncryptionIv();
         switch (header.getCipherId()) {
             .aes128_cbc, .twofish_cbc, .chacha20 => {
@@ -800,14 +870,8 @@ pub const Body = struct {
             },
         }
 
-        //std.log.err("len after decryption: {d}\n", .{inner.items.len});
-        //std.log.err("{s}\n", .{std.fmt.fmtSliceHexLower(inner.items)});
-
         switch (header.getCompression()) {
-            .none => {
-                //std.log.err("len: {d}\n", .{inner.items.len});
-                //std.log.err("{s}\n", .{inner.items});
-            },
+            .none => {},
             .gzip => {
                 var in_stream = std.io.fixedBufferStream(inner.items);
 
@@ -830,8 +894,6 @@ pub const Body = struct {
             allocator,
             &k,
         );
-
-        // std.log.err("{s}\n", .{std.fmt.fmtSliceHexLower(inner.items[0..k])});
 
         return @This(){
             .inner_header = inner_header,
@@ -2389,7 +2451,12 @@ test "verify kdbx4 header mac (positive test)" {
     const header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
     defer header.deinit();
 
-    var keys = try header.deriveKeys("supersecret", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "supersecret"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
 
     try header.checkMac(&keys);
@@ -2404,7 +2471,12 @@ test "recalculate raw header, hash, and mac #1" {
     const hash = header.hash;
     const mac = header.mac;
 
-    var keys = try header.deriveKeys("supersecret", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "supersecret"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
 
     header.hash = .{0} ** 32;
@@ -2424,7 +2496,12 @@ test "verify kdbx4 header mac (negative test)" {
     const header = try Header.readAlloc(fbs.reader(), std.testing.allocator);
     defer header.deinit();
 
-    var keys = try header.deriveKeys("Supersecret", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "Supersecret"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
 
     try std.testing.expectError(error.Authenticity, header.checkMac(&keys));
@@ -2437,7 +2514,12 @@ test "the decryption of a kdbx4 file #1" {
     const header = try Header.readAlloc(reader, std.testing.allocator);
     defer header.deinit();
 
-    var keys = try header.deriveKeys("supersecret", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "supersecret"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
     try header.checkMac(&keys);
 
@@ -2517,7 +2599,12 @@ test "the decryption of a kdbx4 file #2" {
     const header = try Header.readAlloc(reader, std.testing.allocator);
     defer header.deinit();
 
-    var keys = try header.deriveKeys("foobar", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "foobar"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
     try header.checkMac(&keys);
 
@@ -2609,6 +2696,32 @@ test "the decryption of a kdbx4 file #2" {
     try std.testing.expectEqualSlices(u8, "passkey.org", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_RELYING_PARTY").?);
     try std.testing.expectEqualSlices(u8, "peter", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_USERNAME").?);
     try std.testing.expectEqualSlices(u8, "DEMO__9fX19ERU1P", body_xml.root.groups.items[2].entries.items[0].get("KPEX_PASSKEY_USER_HANDLE").?);
+}
+
+test "the decryption of a kdbx4 file #3" {
+    var fbs = std.io.fixedBufferStream(db);
+    const reader = fbs.reader();
+
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "supersecret"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+
+    var database = try Database.open(reader, .{
+        .key = db_key,
+        .allocator = std.testing.allocator,
+    });
+    defer database.deinit();
+
+    // Meta
+    try std.testing.expectEqualSlices(u8, "KeePassXC", database.body.meta.generator);
+    try std.testing.expectEqualSlices(u8, "Test Database", database.body.meta.database_name);
+    try std.testing.expectEqual(@as(i64, 63860739034), database.body.meta.database_name_changed);
+    try std.testing.expectEqualSlices(u8, "This is a test database", database.body.meta.database_description.?);
+    try std.testing.expectEqual(@as(i64, 365), database.body.meta.maintenance_history_days);
+    try std.testing.expectEqual(@as(i64, -1), database.body.meta.master_key_change_rec);
+    try std.testing.expectEqual(@as(i64, -1), database.body.meta.master_key_change_force);
 }
 
 test "xml tests" {
@@ -3179,7 +3292,12 @@ test "create new database #1" {
     const header = try Header.readAlloc(reader, std.testing.allocator);
     defer header.deinit();
 
-    var keys = try header.deriveKeys("1234", null, null);
+    var db_key = DatabaseKey{
+        .password = try std.testing.allocator.dupe(u8, "1234"),
+        .allocator = std.testing.allocator,
+    };
+    defer db_key.deinit();
+    var keys = try header.deriveKeys(db_key);
     defer keys.deinit();
     try header.checkMac(&keys);
 
