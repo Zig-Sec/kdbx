@@ -2,6 +2,7 @@ pub const Database = @import("Database.zig");
 
 pub const v4 = @import("v4.zig");
 pub const Entry = v4.Entry;
+pub const Group = v4.Group;
 
 pub const DatabaseKey = @import("DatabaseKey.zig");
 

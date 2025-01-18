@@ -10,13 +10,18 @@ pub fn main() !void {
     });
     defer database.deinit();
 
+    var group1 = try kdbx.Group.new("Demo group", allocator);
+    errdefer group1.deinit();
+
     var entry1 = kdbx.Entry.new(allocator);
     try entry1.set("Title", "Demo Entry", false);
     try entry1.set("UserName", "max", false);
     try entry1.set("Password", "supersecret", true);
     errdefer entry1.deinit();
 
-    try database.body.root.addEntry(entry1);
+    try group1.addEntry(entry1);
+
+    try database.body.root.addGroup(group1);
 
     const db_key = kdbx.DatabaseKey{
         .password = try allocator.dupe(u8, "1234"),

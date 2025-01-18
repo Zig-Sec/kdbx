@@ -460,6 +460,28 @@ pub const Group = struct {
         try self.entries.append(entry);
     }
 
+    pub fn addGroup(self: *@This(), group: Group) !void {
+        for (0..self.groups.items.len) |i| {
+            if (self.groups.items[i].uuid == group.uuid)
+                return error.GroupAlreadyExists;
+        }
+
+        try self.groups.append(group);
+    }
+
+    pub fn new(name: []const u8, allocator: Allocator) !@This() {
+        return .{
+            .name = try allocator.dupe(u8, name),
+            .uuid = Uuid.v4.new(),
+            .icon_id = 48,
+            .times = Times.new(),
+            .entries = std.ArrayList(Entry).init(allocator),
+            .groups = std.ArrayList(Group).init(allocator),
+            .last_top_visible_entry = 0,
+            .allocator = allocator,
+        };
+    }
+
     pub fn toXml(
         self: *const @This(),
         out: anytype,
