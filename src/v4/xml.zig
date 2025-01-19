@@ -451,6 +451,45 @@ pub const Group = struct {
     groups: std.ArrayList(Group),
     allocator: Allocator,
 
+    pub const IteratorTag = enum { entry, group };
+    pub const Iterator = union(IteratorTag) {
+        entry: struct {
+            grp: *Group,
+            idx: usize = 0,
+        },
+        group: struct {
+            grp: *Group,
+            idx: usize = 0,
+        },
+
+        pub const Result = union(IteratorTag) {
+            entry: *Entry,
+            group: *Group,
+        };
+
+        pub fn next(self: *@This()) ?Result {
+            return switch (self.*) {
+                .entry => |*e| blk: {
+                    if (e.idx >= e.grp.entries.items.len) return null;
+                    defer e.idx += 1;
+                    break :blk .{ .entry = &e.grp.entries.items[e.idx] };
+                },
+                .group => |*g| blk: {
+                    if (g.idx >= g.grp.groups.items.len) return null;
+                    defer g.idx += 1;
+                    break :blk .{ .group = &g.grp.groups.items[g.idx] };
+                },
+            };
+        }
+    };
+
+    pub fn iterate(self: *@This(), @"type": IteratorTag) Iterator {
+        return switch (@"type") {
+            .entry => .{ .entry = .{ .grp = self } },
+            .group => .{ .group = .{ .grp = self } },
+        };
+    }
+
     pub fn addEntry(self: *@This(), entry: Entry) !void {
         for (0..self.entries.items.len) |i| {
             if (self.entries.items[i].uuid == entry.uuid)
@@ -1140,15 +1179,18 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
     errdefer if (auto_type_ != null and auto_type_.?.default_sequence != null)
         allocator.free(auto_type_.?.default_sequence.?);
     if (auto_type) |at| {
-        const enabled = try fetchBool(at, "Enabled", allocator);
-        const data_transfer_obfuscation = try fetchNumTag(at, "DataTransferObfuscation", allocator);
+        const enabled = fetchBool(at, "Enabled", allocator) catch null;
+        const data_transfer_obfuscation = fetchNumTag(at, "DataTransferObfuscation", allocator) catch null;
 
-        const default_sequence = try fetchTagValueNull(at, "DefaultSequence", allocator);
-        auto_type_ = .{
-            .enabled = enabled,
-            .data_transfer_obfuscation = data_transfer_obfuscation,
-            .default_sequence = default_sequence,
-        };
+        const default_sequence = fetchTagValueNull(at, "DefaultSequence", allocator) catch null;
+
+        if (enabled != null and data_transfer_obfuscation != null or default_sequence != null) {
+            auto_type_ = .{
+                .enabled = enabled.?,
+                .data_transfer_obfuscation = data_transfer_obfuscation.?,
+                .default_sequence = default_sequence.?,
+            };
+        }
     }
 
     var history: ?std.ArrayList(Entry) = null;

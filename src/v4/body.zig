@@ -107,6 +107,8 @@ pub const Body = struct {
             },
         }
 
+        //std.debug.print("{s}\n", .{inner.items});
+
         var k: usize = 0;
         const inner_header = try InnerHeader.readAlloc(
             inner.items,
