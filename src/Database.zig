@@ -1,30 +1,25 @@
+//! A KDBX `Database`.
+//!
+//! Currently supported versions: `4.0`, `4.1`.
+
 const std = @import("std");
-const dishwasher = @import("dishwasher");
 const Uuid = @import("uuid");
 const ChaCha20 = @import("chacha.zig").ChaCha20;
-const xml = @import("xml.zig");
 
 const Allocator = std.mem.Allocator;
 
 const misc = @import("misc.zig");
-const decode = misc.decode;
-const encode = misc.encode;
-const encode2 = misc.encode2;
 const currTime = misc.currTime;
 
 const v4 = @import("v4.zig");
 const Field = v4.Field;
 const Header = v4.Header;
 const HVersion = v4.HVersion;
-const Keys = v4.Keys;
 const XML = v4.XML;
 const Meta = v4.Meta;
 const KeyValue = v4.KeyValue;
 const Group = v4.Group;
 const Entry = v4.Entry;
-const Times = v4.Times;
-const AutoType = v4.AutoType;
-const Icon = v4.Icon;
 const InnerHeader = v4.InnerHeader;
 const Body = v4.Body;
 
@@ -54,6 +49,14 @@ pub fn deinit(self: *const @This()) void {
     self.body.deinit();
 }
 
+/// Open a `Database` from a reader.
+///
+/// After using the `Database` it should be closed using `Database.deinit`.
+///
+/// ## Arguments
+///
+/// * `reader` - A `Reader` that wraps the raw database data.
+/// * `options` - Options on how to open the database.
 pub fn open(reader: anytype, options: OpenOptions) !@This() {
     const header = try Header.readAlloc(
         reader,
@@ -88,6 +91,7 @@ pub fn open(reader: anytype, options: OpenOptions) !@This() {
     };
 }
 
+/// Create a new `Database`.
 pub fn new(options: NewDatabaseOptions) !@This() {
     // Outer Header
     var header = Header{
@@ -207,17 +211,20 @@ pub fn new(options: NewDatabaseOptions) !@This() {
     };
 }
 
-pub fn save(self: *@This(), db_key: DatabaseKey, allocator: Allocator) ![]const u8 {
+/// Save the `Database`.
+///
+/// ## Arguments
+///
+/// * `out` - A `Writer` to save the `Database` to.
+/// * `db_key` - A composite key (usually just a password).
+/// * `allocator` - An `Allocator`.
+pub fn save(self: *@This(), out: anytype, db_key: DatabaseKey, allocator: Allocator) !void {
     var keys = try self.header.deriveKeys(db_key);
     try self.header.updateRawHeader();
     self.header.updateHash();
     self.header.updateMac(&keys);
 
     // --------------------------------------------------
-
-    var out_ = std.ArrayList(u8).init(allocator);
-    errdefer out_.deinit();
-    var out = out_.writer();
 
     try out.writeAll(self.header.raw_header);
     try out.writeAll(&self.header.hash);
@@ -341,6 +348,4 @@ pub fn save(self: *@This(), db_key: DatabaseKey, allocator: Allocator) ![]const 
             try out.writeAll(&raw_block_len);
         }
     }
-
-    return try out_.toOwnedSlice();
 }

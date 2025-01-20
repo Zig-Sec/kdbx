@@ -42,23 +42,26 @@ pub fn main() !void {
     };
     defer db_key.deinit();
 
-    const raw = try database.save(
+    var raw = std.ArrayList(u8).init(allocator);
+    defer raw.deinit();
+
+    try database.save(
+        raw.writer(),
         db_key,
         allocator,
     );
-    defer allocator.free(raw);
 
     var file = try std.fs.cwd().createFile("db.kdbx", .{});
     defer file.close();
 
-    try file.writeAll(raw);
+    try file.writeAll(raw.items);
 
     // --------------------------------------------
 
-    var fbs = std.io.fixedBufferStream(raw);
+    var fbs = std.io.fixedBufferStream(raw.items);
     const reader = fbs.reader();
 
-    //std.debug.print("{s}", .{std.fmt.fmtSliceHexLower(raw)});
+    //std.debug.print("{s}", .{std.fmt.fmtSliceHexLower(raw.items)});
 
     var database2 = kdbx.Database.open(reader, .{
         .allocator = allocator,

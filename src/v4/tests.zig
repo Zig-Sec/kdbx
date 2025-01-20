@@ -920,11 +920,14 @@ test "create new database #1" {
     };
     defer db_key.deinit();
 
-    const raw = try database.save(
+    var raw = std.ArrayList(u8).init(allocator);
+    defer raw.deinit();
+
+    try database.save(
+        raw.writer(),
         db_key,
         allocator,
     );
-    defer allocator.free(raw);
 
     //    var file = try std.fs.cwd().createFile("foo.kdbx", .{});
     //    defer file.close();
@@ -933,7 +936,7 @@ test "create new database #1" {
     //
     //    // ------------------------------------
     //
-    var fbs = std.io.fixedBufferStream(raw);
+    var fbs = std.io.fixedBufferStream(raw.items);
     const reader = fbs.reader();
 
     var database2 = try Database.open(reader, .{
