@@ -490,6 +490,48 @@ pub const Group = struct {
         };
     }
 
+    /// This will remove the entry with the given UUID from the group
+    /// if it exists.
+    ///
+    /// The function returns the removed Entry. It is the responibility
+    /// of the caller to `deinit` the Entry as soon as it is no longer
+    /// needed.
+    pub fn removeEntryByUuid(self: *@This(), uuid: Uuid.Uuid) ?Entry {
+        for (0..self.entries.items.len) |i| {
+            if (self.entries.items[i].uuid == uuid) {
+                return self.entries.swapRemove(i);
+            }
+        }
+
+        return null;
+    }
+
+    /// This will remove the nested group with the given UUID from the group
+    /// if it exists.
+    ///
+    /// The function returns the removed Group. It is the responibility
+    /// of the caller to `deinit` the Group and all its children as soon
+    /// as it is no longer needed.
+    pub fn removeGroupByUuid(self: *@This(), uuid: Uuid.Uuid) ?Group {
+        for (0..self.groups.items.len) |i| {
+            if (self.groups.items[i].uuid == uuid) {
+                return self.groups.swapRemove(i);
+            }
+        }
+
+        return null;
+    }
+
+    pub fn getGroupByName(self: *@This(), name: []const u8) ?*Group {
+        for (0..self.groups.items.len) |i| {
+            if (std.mem.eql(u8, self.groups.items[i].name, name)) {
+                return &self.groups.items[i];
+            }
+        }
+
+        return null;
+    }
+
     pub fn addEntry(self: *@This(), entry: Entry) !void {
         for (0..self.entries.items.len) |i| {
             if (self.entries.items[i].uuid == entry.uuid)
@@ -920,19 +962,20 @@ pub const AutoType = struct {
 };
 
 pub fn parseXml(self: *const Body, allocator: Allocator) !XML {
-    const tree = try dishwasher.parseXmlFull(allocator, self.xml);
+    const tree = try dishwasher.parse.fromSlice(allocator, self.xml);
     defer tree.deinit();
 
-    const file = tree.doc.root.elementByTagName("KeePassFile");
+    const file = tree.tree.elementByTagName("KeePassFile");
     if (file == null) return error.KeePassFileTagMissing;
+    if (file.?.tree == null) return error.NoChildren;
 
-    const meta = file.?.elementByTagName("Meta");
+    const meta = file.?.tree.?.elementByTagName("Meta");
     if (meta == null) return error.MetaTagMissing;
 
     const meta_ = try parseMeta(meta.?, allocator);
     errdefer meta_.deinit();
 
-    const root_ = file.?.elementByTagName("Root");
+    const root_ = file.?.tree.?.elementByTagName("Root");
     if (root_ == null) return error.RootTagMissing;
 
     var digest: [64]u8 = .{0} ** 64;
@@ -950,14 +993,18 @@ pub fn parseXml(self: *const Body, allocator: Allocator) !XML {
     return .{ .meta = meta_, .root = root__ };
 }
 
-fn parseRoot(elem: dishwasher.Document.Node.Element, allocator: Allocator, cipher: *ChaCha20) !Group {
-    const curr_group = elem.elementByTagName("Group");
+fn parseRoot(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, cipher: *ChaCha20) !Group {
+    if (elem.tree == null) return error.NoChildren;
+
+    const curr_group = elem.tree.?.elementByTagName("Group");
     if (curr_group == null) return error.RootGroupMissing;
 
     return try parseGroup(curr_group.?, allocator, cipher);
 }
 
-fn parseGroup(elem: dishwasher.Document.Node.Element, allocator: Allocator, cipher: *ChaCha20) !Group {
+fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, cipher: *ChaCha20) !Group {
+    if (elem.tree == null) return error.NoChildren;
+
     var uuid = try fetchUuid(elem, "UUID", allocator);
     errdefer uuid = 0;
 
@@ -976,7 +1023,7 @@ fn parseGroup(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
     var icon_id = try fetchNumTag(elem, "IconID", allocator);
     errdefer icon_id = 0;
 
-    const times = elem.elementByTagName("Times");
+    const times = elem.tree.?.elementByTagName("Times");
     if (times == null) return error.TimesMissing;
 
     var last_modification_time = try fetchTimeTag(times.?, "LastModificationTime", allocator);
@@ -1018,7 +1065,7 @@ fn parseGroup(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
 
     // Parse all entries
 
-    const entries = try elem.elementsByTagNameAlloc(allocator, "Entry");
+    const entries = try elem.tree.?.elementsByTagNameAlloc(allocator, "Entry");
     defer allocator.free(entries);
 
     var entries_array = std.ArrayList(Entry).init(allocator);
@@ -1033,7 +1080,7 @@ fn parseGroup(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
 
     // Parse all groups
 
-    const groups = try elem.elementsByTagNameAlloc(allocator, "Group");
+    const groups = try elem.tree.?.elementsByTagNameAlloc(allocator, "Group");
     defer allocator.free(groups);
 
     var groups_array = std.ArrayList(Group).init(allocator);
@@ -1072,7 +1119,7 @@ fn parseGroup(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
     };
 }
 
-fn parseIcon(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Icon {
+fn parseIcon(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Icon {
     return .{
         .uuid = try fetchUuid(elem, "UUID", allocator),
         .last_modification_time = try fetchTimeTag(elem, "LastModificationTime", allocator),
@@ -1080,7 +1127,9 @@ fn parseIcon(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Icon
     };
 }
 
-fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, cipher: *ChaCha20) !Entry {
+fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, cipher: *ChaCha20) !Entry {
+    if (elem.tree == null) return error.NoChildren;
+
     var uuid = try fetchUuid(elem, "UUID", allocator);
     errdefer uuid = 0;
 
@@ -1113,7 +1162,8 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
         allocator.free(v);
     };
 
-    const times = elem.elementByTagName("Times");
+    if (elem.tree == null) return error.NoChildren;
+    const times = elem.tree.?.elementByTagName("Times");
     if (times == null) return error.TimesMissing;
 
     var last_modification_time = try fetchTimeTag(times.?, "LastModificationTime", allocator);
@@ -1142,10 +1192,12 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
         strings.deinit();
     }
 
-    const strings_ = try elem.elementsByTagNameAlloc(allocator, "String");
+    const strings_ = try elem.tree.?.elementsByTagNameAlloc(allocator, "String");
     defer allocator.free(strings_);
 
     for (strings_) |kv| {
+        if (kv.tree == null) continue;
+
         const key = try fetchTagValue(kv, "Key", allocator);
         errdefer allocator.free(key);
         var value = try fetchTagValue(kv, "Value", allocator);
@@ -1154,7 +1206,7 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
 
         // Deobfuscate value if "Protected = True"
         // Value is present because otherwise the try above would already have thrown an error.
-        if (if (kv.elementByTagName("Value").?.attributeValueByName("Protected")) |bool_value| std.mem.eql(u8, "True", bool_value) else false) {
+        if (if (kv.tree.?.elementByTagName("Value").?.attributeValueByName("Protected")) |bool_value| std.mem.eql(u8, "True", bool_value) else false) {
             const l = try std.base64.standard.Decoder.calcSizeForSlice(value);
             const value_ = try allocator.alloc(u8, l);
             errdefer allocator.free(value_);
@@ -1174,7 +1226,7 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
         });
     }
 
-    const auto_type = elem.elementByTagName("AutoType");
+    const auto_type = elem.tree.?.elementByTagName("AutoType");
     var auto_type_: ?AutoType = null;
     errdefer if (auto_type_ != null and auto_type_.?.default_sequence != null)
         allocator.free(auto_type_.?.default_sequence.?);
@@ -1199,9 +1251,11 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
         h.deinit();
     };
 
-    const hist = elem.elementByTagName("History");
+    const hist = elem.tree.?.elementByTagName("History");
     if (hist) |h| outer: {
-        const entries = try h.elementsByTagNameAlloc(allocator, "Entry");
+        if (h.tree == null) break :outer;
+
+        const entries = try h.tree.?.elementsByTagNameAlloc(allocator, "Entry");
         defer allocator.free(entries);
 
         if (entries.len == 0) break :outer; // nothing to-do
@@ -1237,7 +1291,9 @@ fn parseEntry(elem: dishwasher.Document.Node.Element, allocator: Allocator, ciph
     };
 }
 
-fn parseMeta(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Meta {
+fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta {
+    if (elem.tree == null) return error.NoChildren;
+
     const generator = try fetchTagValue(elem, "Generator", allocator);
     errdefer {
         std.crypto.utils.secureZero(u8, generator);
@@ -1289,7 +1345,7 @@ fn parseMeta(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Meta
     var master_key_change_force = try fetchNumTag(elem, "MasterKeyChangeForce", allocator);
     errdefer master_key_change_force = 0;
 
-    const protection = elem.elementByTagName("MemoryProtection");
+    const protection = elem.tree.?.elementByTagName("MemoryProtection");
     if (protection == null) return error.TagMissing;
     const protect_title = try fetchBool(protection.?, "ProtectTitle", allocator);
     const protect_user_name = try fetchBool(protection.?, "ProtectUserName", allocator);
@@ -1305,9 +1361,11 @@ fn parseMeta(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Meta
         }
     }
 
-    const custom_icons_ = elem.elementByTagName("CustomIcons");
+    const custom_icons_ = elem.tree.?.elementByTagName("CustomIcons");
     if (custom_icons_) |icos| outer: {
-        const icons = try icos.elementsByTagNameAlloc(allocator, "Icon");
+        if (icos.tree == null) break :outer;
+
+        const icons = try icos.tree.?.elementsByTagNameAlloc(allocator, "Icon");
         defer allocator.free(icons);
 
         if (icons.len == 0) break :outer;
@@ -1348,9 +1406,11 @@ fn parseMeta(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Meta
         custom_data.deinit();
     }
 
-    const custom_data_ = elem.elementByTagName("CustomData");
+    const custom_data_ = elem.tree.?.elementByTagName("CustomData");
     if (custom_data_) |cd| outer: {
-        const pairs = cd.elementsByTagNameAlloc(allocator, "Item") catch break :outer;
+        if (cd.tree == null) break :outer;
+
+        const pairs = cd.tree.?.elementsByTagNameAlloc(allocator, "Item") catch break :outer;
         defer allocator.free(pairs);
 
         for (pairs) |kv| {
@@ -1399,21 +1459,27 @@ fn parseMeta(elem: dishwasher.Document.Node.Element, allocator: Allocator) !Meta
     };
 }
 
-fn fetchTagValue(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) ![]u8 {
-    const v = if (elem.elementByTagName(name)) |v| v else {
+fn fetchTagValue(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) ![]u8 {
+    if (elem.tree == null) return error.NoChildren;
+
+    const v = if (elem.tree.?.elementByTagName(name)) |v| v else {
         //std.log.err("{s} tag missing", .{name});
         return error.TagMissing;
     };
-    return @constCast(try v.textAlloc(allocator));
+
+    return if (v.tree) |t| @constCast(try t.concatTextAlloc(allocator)) else try allocator.dupe(u8, "");
 }
 
-fn fetchTagValueNull(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) !?[]u8 {
-    const v = if (elem.elementByTagName(name)) |v| v else return null;
-    return @constCast(try v.textAlloc(allocator));
+fn fetchTagValueNull(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) !?[]u8 {
+    if (elem.tree == null) return error.NoChildren;
+
+    const v = if (elem.tree.?.elementByTagName(name)) |v| v else return null;
+
+    return if (v.tree) |t| @constCast(try t.concatTextAlloc(allocator)) else try allocator.dupe(u8, "");
 }
 
 /// Fetch time in seconds
-fn fetchTimeTag(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) !i64 {
+fn fetchTimeTag(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) !i64 {
     const time = try fetchTagValue(elem, name, allocator);
     defer allocator.free(time);
     const l = try std.base64.standard.Decoder.calcSizeForSlice(time);
@@ -1426,13 +1492,13 @@ fn fetchTimeTag(elem: dishwasher.Document.Node.Element, name: []const u8, alloca
     return @intCast(t);
 }
 
-fn fetchNumTag(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) !i64 {
+fn fetchNumTag(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) !i64 {
     const value = try fetchTagValue(elem, name, allocator);
     defer allocator.free(value);
     return try std.fmt.parseInt(i64, value, 10);
 }
 
-fn fetchBool(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) !bool {
+fn fetchBool(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) !bool {
     const value = try fetchTagValue(elem, name, allocator);
     defer allocator.free(value);
     return if (std.mem.eql(u8, "False", value))
@@ -1443,7 +1509,7 @@ fn fetchBool(elem: dishwasher.Document.Node.Element, name: []const u8, allocator
         error.NotABool;
 }
 
-fn fetchUuid(elem: dishwasher.Document.Node.Element, name: []const u8, allocator: Allocator) !Uuid.Uuid {
+fn fetchUuid(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) !Uuid.Uuid {
     const time = try fetchTagValue(elem, name, allocator);
     defer allocator.free(time);
     const l = try std.base64.standard.Decoder.calcSizeForSlice(time);

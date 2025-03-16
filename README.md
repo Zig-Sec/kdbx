@@ -1,6 +1,9 @@
 # KDBX - Keepass Database XML
 
-This Zig module allows you to integrate KDBX support into your application.
+This Zig module allows you to integrate KDBX support into your application. This format is
+used by password databases like [KeePass](https://keepass.info/download.html) and 
+[KeePassXC](https://keepassxc.org/) to store passwords, [passkeys](https://fidoalliance.org/passkeys/) 
+and other credentials.
 
 > Currently only KDBX4 is supported.
 

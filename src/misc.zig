@@ -4,7 +4,7 @@ const std = @import("std");
 const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
 
 pub fn decode(T: type, arr: anytype) T {
-    const bytes = @typeInfo(T).Int.bits / 8;
+    const bytes = @typeInfo(T).int.bits / 8;
     var tmp: T = 0;
 
     for (0..bytes) |i| {
