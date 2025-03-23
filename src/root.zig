@@ -6,7 +6,13 @@ pub const v4 = @import("v4.zig");
 pub const Entry = v4.Entry;
 pub const Group = v4.Group;
 
+pub const pem = @import("pem.zig");
+
 pub const DatabaseKey = @import("DatabaseKey.zig");
+
+test {
+    _ = pem;
+}
 
 test "v4 tests" {
     _ = Database;

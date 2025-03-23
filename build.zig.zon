@@ -30,8 +30,8 @@
             .hash = "clap-0.10.0-oBajB434AQBDh-Ei3YtoKIRxZacVPF1iSwp3IX_ZB8f0",
         },
         .uuid = .{
-            .url = "https://github.com/r4gus/uuid-zig/archive/refs/tags/0.3.0.tar.gz",
-            .hash = "uuid-0.3.0-oOieIVZ4AAB_apOo9zFV0a85GYAST-trqzRJMeEfYuQu",
+            .url = "https://github.com/r4gus/uuid-zig/archive/refs/tags/0.3.1.tar.gz",
+            .hash = "uuid-0.3.0-oOieIYF1AAA_BtE7FvVqqTn5uEYTvvz7ycuVnalCOf8C",
         },
         .dishwasher = .{
             .url = "https://github.com/edqx/dishwasher/archive/refs/tags/1.0.7.tar.gz",
