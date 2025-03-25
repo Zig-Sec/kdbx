@@ -947,3 +947,58 @@ test "create new database #1" {
 
     try std.testing.expectEqual(InnerHeader.StreamCipher.ChaCha20, database2.inner_header.stream_cipher);
 }
+
+test "create new database with passkeys #1" {
+    const allocator = std.testing.allocator;
+
+    var database = try Database.new(.{
+        .allocator = allocator,
+    });
+    defer database.deinit();
+
+    // ----
+
+    const grp = try Group.new("PassKeeZ Passkeys", allocator);
+    try database.body.root.addGroup(grp);
+
+    const pkgrp = database.body.root.getGroupByName("PassKeeZ Passkeys");
+    try std.testing.expect(pkgrp != null);
+
+    const pk_entry1 = try Entry.newKeePassXCPasskey(allocator, "passkey.org", "peter", "DEMO__9fX19ERU1P", "ES256");
+    try pkgrp.?.addEntry(pk_entry1);
+
+    // ----
+
+    const db_key = DatabaseKey{
+        .password = try allocator.dupe(u8, "1234"),
+        .allocator = allocator,
+    };
+    defer db_key.deinit();
+
+    var raw = std.ArrayList(u8).init(allocator);
+    defer raw.deinit();
+
+    try database.save(
+        raw.writer(),
+        db_key,
+        allocator,
+    );
+
+    // ----
+
+    var fbs = std.io.fixedBufferStream(raw.items);
+    const reader = fbs.reader();
+
+    var database2 = try Database.open(reader, .{
+        .allocator = allocator,
+        .key = db_key,
+    });
+    defer database2.deinit();
+
+    try std.testing.expectEqual(InnerHeader.StreamCipher.ChaCha20, database2.inner_header.stream_cipher);
+
+    const pkgrp2 = database.body.root.getGroupByName("PassKeeZ Passkeys");
+    try std.testing.expect(pkgrp2 != null);
+
+    try std.testing.expect(pkgrp2.?.entries.items[0].isValidKeePassXCPasskey());
+}

@@ -13,6 +13,8 @@ const Body = v4.Body;
 const misc = @import("../misc.zig");
 const currTime = misc.currTime;
 
+const pem = @import("../pem.zig");
+
 const XML_INDENT = 2;
 
 const TIME_DIFF_KDBX_EPOCH_IN_SEC = 62135600008;
@@ -711,6 +713,61 @@ pub const Entry = struct {
             .strings = std.ArrayList(KeyValue).init(allocator),
             .allocator = allocator,
         };
+    }
+
+    /// Create a new passkey compatible with KeePassXC.
+    ///
+    /// Supported signature schemes:
+    /// * ES256 (ECDSA-P256-SHA256)
+    pub fn newKeePassXCPasskey(
+        allocator: Allocator,
+        relying_party: []const u8,
+        user_name: []const u8,
+        user_id: []const u8,
+        signature_scheme: []const u8,
+    ) !@This() {
+        var e = new(allocator);
+        errdefer e.deinit();
+
+        if (std.mem.eql(u8, "ES256", signature_scheme)) {
+            const es256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
+            const kp = es256.KeyPair.generate();
+            const pem_key = try pem.pemFromKey(kp, allocator);
+            defer {
+                std.crypto.secureZero(u8, pem_key);
+                allocator.free(pem_key);
+            }
+            try e.set("KPEX_PASSKEY_PRIVATE_KEY_PEM", pem_key, true);
+        } else {
+            return error.InvalidSignatureScheme;
+        }
+
+        // The uuid of the entry is also the credential id of the passkey
+        try e.set("KPEX_PASSKEY_CREDENTIAL_ID", Uuid.urn.serialize(e.uuid)[0..], false);
+
+        try e.set("KPEX_PASSKEY_RELYING_PARTY", relying_party, false);
+        try e.set("KPEX_PASSKEY_USERNAME", user_name, false);
+        try e.set("KPEX_PASSKEY_USER_HANDLE", user_id, false);
+
+        return e;
+    }
+
+    /// Check if the given entry is a valid KeePassXC passkey.
+    ///
+    /// This will also return `false` if the PEM key is not supported
+    /// by this module. One reason could be that the cipher is not supported.
+    pub fn isValidKeePassXCPasskey(self: *const @This()) bool {
+        // Check that a valid key is present in PEM format
+        const pem_key = self.get("KPEX_PASSKEY_PRIVATE_KEY_PEM");
+        if (pem_key == null) return false;
+        _ = pem.asymmetricKeyPairFromPem(pem_key.?, self.allocator) catch return false;
+
+        if (self.get("KPEX_PASSKEY_CREDENTIAL_ID") == null) return false;
+        if (self.get("KPEX_PASSKEY_RELYING_PARTY") == null) return false;
+        if (self.get("KPEX_PASSKEY_USERNAME") == null) return false;
+        if (self.get("KPEX_PASSKEY_USER_HANDLE") == null) return false;
+
+        return true;
     }
 
     pub fn get(self: *const @This(), key: []const u8) ?[]u8 {

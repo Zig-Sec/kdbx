@@ -11,7 +11,7 @@ pub const AsymmetricKeyPair = union(AsymmetricKeyPairTag) {
     EcdsaP256Sha256: std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair,
 };
 
-pub fn asn1FromKey(key: anytype, allocator: std.mem.Allocator) ![]const u8 {
+pub fn asn1FromKey(key: anytype, allocator: std.mem.Allocator) ![]u8 {
     const T = @TypeOf(key);
 
     if (T == std.crypto.sign.ecdsa.EcdsaP256Sha256.SecretKey) {
@@ -33,7 +33,7 @@ pub fn asn1FromKey(key: anytype, allocator: std.mem.Allocator) ![]const u8 {
     }
 }
 
-pub fn pemFromKey(key: anytype, allocator: std.mem.Allocator) ![]const u8 {
+pub fn pemFromKey(key: anytype, allocator: std.mem.Allocator) ![]u8 {
     const asn1 = try asn1FromKey(key, allocator);
     defer allocator.free(asn1);
 
