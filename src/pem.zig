@@ -11,6 +11,56 @@ pub const AsymmetricKeyPair = union(AsymmetricKeyPairTag) {
     EcdsaP256Sha256: std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair,
 };
 
+pub fn asn1FromKey(key: anytype, allocator: std.mem.Allocator) ![]const u8 {
+    const T = @TypeOf(key);
+
+    if (T == std.crypto.sign.ecdsa.EcdsaP256Sha256.SecretKey) {
+        return error.UnsupportedKeyType;
+    } else if (T == std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair) {
+        // asn.1 template for es256 keys
+        const template = "\x30\x81\x87\x02\x01\x00\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07\x04\x6d\x30\x6b\x02\x01\x01\x04\x20{s}\xa1\x44\x03\x42\x00\x04{s}{s}";
+        const k: std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair = key;
+        const dhex = k.secret_key.toBytes();
+        const sec1 = k.public_key.toUncompressedSec1();
+
+        return try std.fmt.allocPrint(allocator, template, .{
+            dhex,
+            sec1[1..33],
+            sec1[33..65],
+        });
+    } else {
+        return error.UnsupportedKeyType;
+    }
+}
+
+pub fn pemFromKey(key: anytype, allocator: std.mem.Allocator) ![]const u8 {
+    const asn1 = try asn1FromKey(key, allocator);
+    defer allocator.free(asn1);
+
+    const b64 = try allocator.alloc(u8, std.base64.standard.Encoder.calcSize(asn1.len));
+    defer allocator.free(b64);
+    _ = std.base64.standard.Encoder.encode(b64, asn1);
+
+    var arr = std.ArrayList(u8).init(allocator);
+    errdefer arr.deinit();
+
+    try arr.appendSlice("-----BEGIN PRIVATE KEY-----\n");
+
+    var i: usize = 0;
+    while (i < b64.len) {
+        const l = if (i + 64 > b64.len) b64.len - i else 64;
+
+        try arr.appendSlice(b64[i .. i + l]);
+        try arr.append('\n');
+
+        i += l;
+    }
+
+    try arr.appendSlice("-----END PRIVATE KEY-----\n");
+
+    return try arr.toOwnedSlice();
+}
+
 pub fn asymmetricKeyPairFromPem(pem: []const u8, allocator: std.mem.Allocator) !AsymmetricKeyPair {
     var iter = std.mem.splitAny(u8, pem, "\n");
 
@@ -219,6 +269,7 @@ pub const OID = enum {
 pub const TagValue = struct {
     tag: Tag,
     tag_class: TagClass,
+    constructed: bool = false,
     value: []const u8,
     // The total size in bytes used by this object,
     // including the tag, length and value.
@@ -260,6 +311,7 @@ pub const TagValue = struct {
         return .{
             .tag = tag,
             .tag_class = tag_class,
+            .constructed = if (s[0] & 0b00100000 != 0) true else false,
             .value = value,
             .total_size = total_size,
         };
@@ -462,4 +514,26 @@ test "parse PEM into EcdsaP256Sha256" {
     const kp = try asymmetricKeyPairFromPem(k, std.testing.allocator);
 
     try std.testing.expectEqualSlices(u8, "\x7d\x55\xd4\xac\x0d\xbd\xa7\x62\xe7\xa8\x2d\xd3\x07\xfa\xa2\x9d\xd9\x8d\x57\xec\xbe\xeb\xe0\xa7\xe4\x0c\x07\xfe\x3d\xc8\xcf\x4f", kp.EcdsaP256Sha256.secret_key.toBytes()[0..]);
+}
+
+test "serialize es256 key pair to asn.1" {
+    const expected = "\x30\x81\x87\x02\x01\x00\x30\x13\x06\x07\x2a\x86\x48\xce\x3d\x02\x01\x06\x08\x2a\x86\x48\xce\x3d\x03\x01\x07\x04\x6d\x30\x6b\x02\x01\x01\x04\x20\x7d\x55\xd4\xac\x0d\xbd\xa7\x62\xe7\xa8\x2d\xd3\x07\xfa\xa2\x9d\xd9\x8d\x57\xec\xbe\xeb\xe0\xa7\xe4\x0c\x07\xfe\x3d\xc8\xcf\x4f\xa1\x44\x03\x42\x00\x04\x11\x28\xbb\xa8\xc7\x7e\xf1\x95\x31\xe7\xba\x64\xb2\xbd\x33\x25\x1e\x1d\x55\x30\xbd\x9e\x4b\x1b\x58\xc1\xc7\x80\xfe\x9a\xb5\x81\x23\x37\x5c\xe4\x67\x5f\x09\xec\x70\xd0\x5a\x10\x91\xbc\xd4\x72\x69\xeb\xe4\xf9\x32\x28\xa6\x3e\xdb\x3b\x57\x05\x23\xf4\x6d\x2c";
+
+    const d = try std.crypto.sign.ecdsa.EcdsaP256Sha256.SecretKey.fromBytes("\x7d\x55\xd4\xac\x0d\xbd\xa7\x62\xe7\xa8\x2d\xd3\x07\xfa\xa2\x9d\xd9\x8d\x57\xec\xbe\xeb\xe0\xa7\xe4\x0c\x07\xfe\x3d\xc8\xcf\x4f".*);
+    const kp = try std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair.fromSecretKey(d);
+    const asn1 = try asn1FromKey(kp, std.testing.allocator);
+    defer std.testing.allocator.free(asn1);
+
+    try std.testing.expectEqualSlices(u8, expected, asn1);
+}
+
+test "serialize es256 key pair to pem" {
+    const expected = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgfVXUrA29p2LnqC3T\nB/qindmNV+y+6+Cn5AwH/j3Iz0+hRANCAAQRKLuox37xlTHnumSyvTMlHh1VML2e\nSxtYwceA/pq1gSM3XORnXwnscNBaEJG81HJp6+T5MiimPts7VwUj9G0s\n-----END PRIVATE KEY-----\n";
+
+    const d = try std.crypto.sign.ecdsa.EcdsaP256Sha256.SecretKey.fromBytes("\x7d\x55\xd4\xac\x0d\xbd\xa7\x62\xe7\xa8\x2d\xd3\x07\xfa\xa2\x9d\xd9\x8d\x57\xec\xbe\xeb\xe0\xa7\xe4\x0c\x07\xfe\x3d\xc8\xcf\x4f".*);
+    const kp = try std.crypto.sign.ecdsa.EcdsaP256Sha256.KeyPair.fromSecretKey(d);
+    const pem = try pemFromKey(kp, std.testing.allocator);
+    defer std.testing.allocator.free(pem);
+
+    try std.testing.expectEqualSlices(u8, expected, pem);
 }
