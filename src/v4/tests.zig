@@ -958,14 +958,10 @@ test "create new database with passkeys #1" {
 
     // ----
 
-    const grp = try Group.new("PassKeeZ Passkeys", allocator);
-    try database.body.root.addGroup(grp);
-
-    const pkgrp = database.body.root.getGroupByName("PassKeeZ Passkeys");
-    try std.testing.expect(pkgrp != null);
+    const pkgrp = try database.body.root.createGroup("PassKeeZ Passkeys");
 
     const pk_entry1 = try Entry.newKeePassXCPasskey(allocator, "passkey.org", "peter", "DEMO__9fX19ERU1P", "ES256");
-    try pkgrp.?.addEntry(pk_entry1);
+    try pkgrp.addEntry(pk_entry1);
 
     // ----
 

@@ -524,6 +524,16 @@ pub const Group = struct {
         return null;
     }
 
+    pub fn getEntryById(self: *@This(), uuid: Uuid.Uuid) ?*Entry {
+        for (0..self.entries.items.len) |i| {
+            if (self.entries.items[i].uuid == uuid) {
+                return &self.entries.items[i];
+            }
+        }
+
+        return null;
+    }
+
     pub fn getGroupByName(self: *@This(), name: []const u8) ?*Group {
         for (0..self.groups.items.len) |i| {
             if (std.mem.eql(u8, self.groups.items[i].name, name)) {
@@ -543,6 +553,11 @@ pub const Group = struct {
         try self.entries.append(entry);
     }
 
+    pub fn createEntry(self: *@This()) !*Entry {
+        try self.entries.append(Entry.new(self.allocator));
+        return &self.entries.items[self.entries.items.len - 1];
+    }
+
     pub fn addGroup(self: *@This(), group: Group) !void {
         for (0..self.groups.items.len) |i| {
             if (self.groups.items[i].uuid == group.uuid)
@@ -550,6 +565,11 @@ pub const Group = struct {
         }
 
         try self.groups.append(group);
+    }
+
+    pub fn createGroup(self: *@This(), name: []const u8) !*@This() {
+        try self.groups.append(try Group.new(name, self.allocator));
+        return &self.groups.items[self.groups.items.len - 1];
     }
 
     pub fn new(name: []const u8, allocator: Allocator) !@This() {
@@ -729,27 +749,42 @@ pub const Entry = struct {
         var e = new(allocator);
         errdefer e.deinit();
 
-        if (std.mem.eql(u8, "ES256", signature_scheme)) {
+        const pem_key = if (std.mem.eql(u8, "ES256", signature_scheme)) blk: {
             const es256 = std.crypto.sign.ecdsa.EcdsaP256Sha256;
             const kp = es256.KeyPair.generate();
-            const pem_key = try pem.pemFromKey(kp, allocator);
-            defer {
-                std.crypto.secureZero(u8, pem_key);
-                allocator.free(pem_key);
-            }
-            try e.set("KPEX_PASSKEY_PRIVATE_KEY_PEM", pem_key, true);
+            break :blk try pem.pemFromKey(kp, allocator);
         } else {
             return error.InvalidSignatureScheme;
+        };
+        defer {
+            std.crypto.secureZero(u8, pem_key);
+            allocator.free(pem_key);
         }
 
-        // The uuid of the entry is also the credential id of the passkey
-        try e.set("KPEX_PASSKEY_CREDENTIAL_ID", Uuid.urn.serialize(e.uuid)[0..], false);
-
-        try e.set("KPEX_PASSKEY_RELYING_PARTY", relying_party, false);
-        try e.set("KPEX_PASSKEY_USERNAME", user_name, false);
-        try e.set("KPEX_PASSKEY_USER_HANDLE", user_id, false);
+        try e.setKeePassXCPasskeyValues(
+            relying_party,
+            user_name,
+            user_id,
+            pem_key,
+        );
 
         return e;
+    }
+
+    pub fn setKeePassXCPasskeyValues(
+        self: *@This(),
+        relying_party: []const u8,
+        user_name: []const u8,
+        user_id: []const u8,
+        pem_key: []const u8,
+    ) !void {
+        // The uuid of the entry is also the credential id of the passkey
+        try self.set("KPEX_PASSKEY_CREDENTIAL_ID", Uuid.urn.serialize(self.uuid)[0..], true);
+
+        try self.set("KPEX_PASSKEY_RELYING_PARTY", relying_party, true);
+        try self.set("KPEX_PASSKEY_USERNAME", user_name, true);
+        try self.set("KPEX_PASSKEY_USER_HANDLE", user_id, true);
+        try self.set("KPEX_PASSKEY_PRIVATE_KEY_PEM", pem_key, true);
     }
 
     /// Check if the given entry is a valid KeePassXC passkey.
