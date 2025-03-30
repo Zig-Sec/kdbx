@@ -250,7 +250,7 @@ pub fn save(self: *@This(), out: anytype, db_key: DatabaseKey, allocator: Alloca
 
         try self.body.toXml(inner, &cipher);
 
-        std.debug.print("{s}\n", .{inner_.items});
+        //std.debug.print("{s}\n", .{inner_.items});
 
         if (self.header.getCompression() == .gzip) {
             var in_stream = std.io.fixedBufferStream(inner_.items);
