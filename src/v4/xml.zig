@@ -768,6 +768,10 @@ pub const Entry = struct {
             pem_key,
         );
 
+        try e.set("URL", relying_party, false);
+        try e.set("UserName", user_name, false);
+        e.tags = try e.allocator.dupe(u8, "Passkey");
+
         return e;
     }
 
