@@ -768,10 +768,6 @@ pub const Entry = struct {
             pem_key,
         );
 
-        try e.set("URL", relying_party, false);
-        try e.set("UserName", user_name, false);
-        e.tags = try e.allocator.dupe(u8, "Passkey");
-
         return e;
     }
 
@@ -782,13 +778,28 @@ pub const Entry = struct {
         user_id: []const u8,
         pem_key: []const u8,
     ) !void {
+        var uid = std.ArrayList(u8).init(self.allocator);
+        defer uid.deinit();
+        try writeBase64(uid.writer(), user_id, self.allocator);
+
         // The uuid of the entry is also the credential id of the passkey
         try self.set("KPEX_PASSKEY_CREDENTIAL_ID", Uuid.urn.serialize(self.uuid)[0..], true);
 
         try self.set("KPEX_PASSKEY_RELYING_PARTY", relying_party, true);
+
         try self.set("KPEX_PASSKEY_USERNAME", user_name, true);
-        try self.set("KPEX_PASSKEY_USER_HANDLE", user_id, true);
+
+        try self.set("KPEX_PASSKEY_USER_HANDLE", uid.items, true);
+
         try self.set("KPEX_PASSKEY_PRIVATE_KEY_PEM", pem_key, true);
+
+        const title = try std.fmt.allocPrint(self.allocator, "{s} (Passkey)", .{relying_party});
+        defer self.allocator.free(title);
+
+        try self.set("Title", title, false);
+        try self.set("URL", relying_party, false);
+        try self.set("UserName", user_name, false);
+        self.tags = try self.allocator.dupe(u8, "Passkey");
     }
 
     /// Check if the given entry is a valid KeePassXC passkey.
