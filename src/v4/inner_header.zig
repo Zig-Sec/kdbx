@@ -55,7 +55,8 @@ pub const InnerHeader = struct {
 
         for (self.binary.items) |binary| {
             try out.writeByte(0x03);
-            try encode2(out, 4, @as(u32, @intCast(binary.len)));
+            try encode2(out, 4, @as(u32, @intCast(binary.len + 1)));
+            try out.writeByte(0x01); // protected flag even though we don't protect the data (same as KeePassXC).
             try out.writeAll(binary);
         }
 
@@ -96,7 +97,18 @@ pub const InnerHeader = struct {
                 0 => break, // EOF
                 1 => stream_cipher = try StreamCipher.fromSlice(m),
                 2 => stream_key = try allocator.dupe(u8, m),
-                3 => try binary.append(try allocator.dupe(u8, m)),
+                3 => {
+                    if (m.len == 0) return error.InnerHeaderBinaryMissingFlag;
+                    switch (m[0]) {
+                        0 => {},
+                        1 => {}, // "protected" but KeePassXC just sets it
+                        else => {
+                            std.log.err("InnerHeaderInvalidBinaryFlag {d}", .{m[0]});
+                            return error.InnerHeaderInvalidBinaryFlag;
+                        },
+                    }
+                    try binary.append(try allocator.dupe(u8, m[1..]));
+                },
                 else => {},
             }
         }
