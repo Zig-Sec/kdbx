@@ -337,6 +337,39 @@ pub const Meta = struct {
     }
 };
 
+pub const Binary = struct {
+    key: []u8,
+    value: usize,
+
+    pub fn toXml(
+        self: *const @This(),
+        out: anytype,
+        level: usize,
+        allocator: Allocator,
+    ) !void {
+        _ = allocator;
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Binary>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("<Key>");
+        try out.writeAll(self.key);
+        try out.writeAll("</Key>\n");
+
+        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+        try out.print("<Value Ref=\"{d}\"/>", .{self.value});
+
+        for (0..level * XML_INDENT) |_| try out.writeByte(' ');
+        try out.writeAll("</Binary>\n");
+    }
+
+    pub fn deinit(self: *const @This(), allocator: Allocator) void {
+        std.crypto.utils.secureZero(u8, self.key);
+        allocator.free(self.key);
+    }
+};
+
 pub const Icon = struct {
     uuid: Uuid.Uuid,
     last_modification_time: i64,
@@ -720,7 +753,7 @@ pub const Entry = struct {
     tags: ?[]u8 = null,
     times: Times,
     strings: std.ArrayList(KeyValue),
-    // TODO: Binary
+    binaries: std.ArrayList(Binary),
     auto_type: ?AutoType = null,
     history: ?std.ArrayList(Entry) = null,
     allocator: Allocator,
@@ -731,6 +764,7 @@ pub const Entry = struct {
             .icon_id = 0,
             .times = Times.new(),
             .strings = std.ArrayList(KeyValue).init(allocator),
+            .binaries = std.ArrayList(Binary).init(allocator),
             .allocator = allocator,
         };
     }
@@ -899,6 +933,14 @@ pub const Entry = struct {
             );
         }
 
+        for (self.binaries.items) |kv| {
+            try kv.toXml(
+                out,
+                level + 1,
+                self.allocator,
+            );
+        }
+
         if (self.auto_type) |at| {
             try at.toXml(out, level + 1, self.allocator);
         } else {
@@ -946,6 +988,10 @@ pub const Entry = struct {
             kv.deinit(self.allocator);
         }
         self.strings.deinit();
+        for (self.binaries.items) |kv| {
+            kv.deinit(self.allocator);
+        }
+        self.binaries.deinit();
         if (self.auto_type) |v| v.deinit(self.allocator);
 
         if (self.history) |h| {
@@ -1333,6 +1379,40 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
         });
     }
 
+    var binaries = std.ArrayList(Binary).init(allocator);
+    errdefer {
+        for (binaries.items) |item| item.deinit(allocator);
+        binaries.deinit();
+    }
+
+    const binaries_ = try elem.tree.?.elementsByTagNameAlloc(allocator, "Binary");
+    defer allocator.free(binaries_);
+
+    for (binaries_) |kv| {
+        if (kv.tree == null) continue;
+
+        const key = try fetchTagValue(kv, "Key", allocator);
+        errdefer allocator.free(key);
+
+        const value_elem = kv.tree.?.elementByTagName("Value");
+        if (value_elem == null) {
+            std.log.err("malformed <Binary> (Value missing)", .{});
+            return error.MalformedBinary;
+        }
+
+        const ref = value_elem.?.attributeValueByName("Ref");
+        if (ref == null) {
+            std.log.err("malformed <Binary> (Ref missing)", .{});
+            return error.MalformedBinary;
+        }
+        const index = try std.fmt.parseInt(usize, ref.?, 0);
+
+        try binaries.append(.{
+            .key = key,
+            .value = index,
+        });
+    }
+
     const auto_type = elem.tree.?.elementByTagName("AutoType");
     var auto_type_: ?AutoType = null;
     errdefer if (auto_type_ != null and auto_type_.?.default_sequence != null)
@@ -1392,6 +1472,7 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
             .location_changed = location_changed,
         },
         .strings = strings,
+        .binaries = binaries,
         .auto_type = auto_type_,
         .history = history,
         .allocator = allocator,

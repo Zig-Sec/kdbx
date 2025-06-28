@@ -508,6 +508,7 @@ test "serialize entry #1" {
             .location_changed = 63860739126,
         },
         .strings = arr,
+        .binaries = std.ArrayList(v4.Binary).init(allocator),
         .auto_type = .{
             .enabled = true,
             .data_transfer_obfuscation = 0,
@@ -660,6 +661,7 @@ test "serialize entry #2" {
             .location_changed = 63860739126,
         },
         .strings = std.ArrayList(KeyValue).init(allocator),
+        .binaries = std.ArrayList(v4.Binary).init(allocator),
         .auto_type = .{
             .enabled = true,
             .data_transfer_obfuscation = 0,
@@ -695,6 +697,7 @@ test "serialize entry #2" {
             .location_changed = 0x0ede658c6f,
         },
         .strings = std.ArrayList(KeyValue).init(allocator),
+        .binaries = std.ArrayList(v4.Binary).init(allocator),
         .auto_type = .{
             .enabled = true,
             .data_transfer_obfuscation = 0,

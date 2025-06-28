@@ -21,6 +21,7 @@ pub const AutoType = xml.AutoType;
 pub const KeyValue = xml.KeyValue;
 pub const Times = xml.Times;
 pub const parseXml = xml.parseXml;
+pub const Binary = xml.Binary;
 
 const inner_header = @import("v4/inner_header.zig");
 pub const InnerFieldTag = inner_header.InnerFieldTag;
