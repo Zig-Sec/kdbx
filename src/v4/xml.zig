@@ -358,7 +358,7 @@ pub const Binary = struct {
         try out.writeAll("</Key>\n");
 
         for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
-        try out.print("<Value Ref=\"{d}\"/>", .{self.value});
+        try out.print("<Value Ref=\"{d}\"/>\n", .{self.value});
 
         for (0..level * XML_INDENT) |_| try out.writeByte(' ');
         try out.writeAll("</Binary>\n");
@@ -1606,8 +1606,13 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
             errdefer allocator.free(key);
             const value = try fetchTagValue(kv, "Value", allocator);
             errdefer allocator.free(value);
+            const lmt = fetchTimeTag(elem, "SettingsChanged", allocator) catch null;
 
-            try custom_data.append(KeyValue{ .key = key, .value = value });
+            try custom_data.append(KeyValue{
+                .key = key,
+                .value = value,
+                .last_modification_time = lmt,
+            });
         }
     }
 
