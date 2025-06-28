@@ -334,6 +334,9 @@ pub fn save(self: *@This(), out: anytype, db_key: DatabaseKey, allocator: Alloca
         // Instead, the header should encode the block length and the parser
         // is expected to stop if a block is less than the defined block length...
         // ... but whom be I to judge ...
+        //
+        // Maybe otherwise we don't know if the MAC has been calulated over "the
+        // whole file" (in some sense...).
         {
             var raw_block_index: [8]u8 = .{0} ** 8;
             std.mem.writeInt(u64, &raw_block_index, i, .little);
