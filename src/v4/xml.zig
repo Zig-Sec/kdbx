@@ -948,7 +948,9 @@ pub const Entry = struct {
             try out.writeAll("<AutoType/>\n");
         }
 
-        if (self.history) |hist| {
+        if (self.history) |hist| blk: {
+            if (hist.items.len == 0) break :blk;
+
             for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
             try out.writeAll("<History>\n");
 
@@ -958,10 +960,7 @@ pub const Entry = struct {
 
             for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
             try out.writeAll("</History>\n");
-        } else {
-            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
-            try out.writeAll("<History/>\n");
-        }
+        } // Else: no History block
 
         for (0..level * XML_INDENT) |_| try out.writeByte(' ');
         try out.writeAll("</Entry>\n");
@@ -1427,7 +1426,7 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
             auto_type_ = .{
                 .enabled = enabled.?,
                 .data_transfer_obfuscation = data_transfer_obfuscation.?,
-                .default_sequence = default_sequence.?,
+                .default_sequence = default_sequence,
             };
         }
     }

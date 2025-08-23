@@ -465,7 +465,6 @@ test "serialize entry #1" {
         \\    <DataTransferObfuscation>0</DataTransferObfuscation>
         \\    <DefaultSequence/>
         \\  </AutoType>
-        \\  <History/>
         \\</Entry>
         \\
     ;
@@ -598,7 +597,6 @@ test "serialize entry #2" {
         \\      <DataTransferObfuscation>0</DataTransferObfuscation>
         \\      <DefaultSequence/>
         \\    </AutoType>
-        \\    <History/>
         \\  </Entry>
         \\  <Entry>
         \\    <UUID>Fkt7IHIgRHGuvzAjpwSy9A==</UUID>
@@ -641,7 +639,6 @@ test "serialize entry #2" {
         \\      <DataTransferObfuscation>0</DataTransferObfuscation>
         \\      <DefaultSequence/>
         \\    </AutoType>
-        \\    <History/>
         \\  </Entry>
         \\</Group>
         \\
