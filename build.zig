@@ -69,4 +69,18 @@ pub fn build(b: *std.Build) !void {
     }
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
+
+    const gzip_module = b.addModule("gzip", .{
+        .root_source_file = b.path("src/gzip.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    try b.modules.put(b.dupe("gzip"), gzip_module);
+
+    const gzip_unit_tests = b.addTest(.{
+        .root_module = gzip_module,
+    });
+    const run_gzip_unit_tests = b.addRunArtifact(gzip_unit_tests);
+    const gzip_test_step = b.step("test-gzip", "Run gzip unit tests");
+    gzip_test_step.dependOn(&run_gzip_unit_tests.step);
 }
