@@ -25,7 +25,7 @@ pub fn encode(comptime n: usize, int: anytype) [n]u8 {
     return tmp;
 }
 
-pub fn encode2(out: anytype, l: usize, v: anytype) !void {
+pub fn encode2(out: *std.Io.Writer, l: usize, v: anytype) !void {
     var v2: @TypeOf(v) = v;
 
     for (0..l) |_| {

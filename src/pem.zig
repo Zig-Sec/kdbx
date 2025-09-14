@@ -41,24 +41,24 @@ pub fn pemFromKey(key: anytype, allocator: std.mem.Allocator) ![]u8 {
     defer allocator.free(b64);
     _ = std.base64.standard.Encoder.encode(b64, asn1);
 
-    var arr = std.ArrayList(u8).init(allocator);
-    errdefer arr.deinit();
+    var arr: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer arr.deinit(allocator);
 
-    try arr.appendSlice("-----BEGIN PRIVATE KEY-----\n");
+    try arr.appendSlice(allocator, "-----BEGIN PRIVATE KEY-----\n");
 
     var i: usize = 0;
     while (i < b64.len) {
         const l = if (i + 64 > b64.len) b64.len - i else 64;
 
-        try arr.appendSlice(b64[i .. i + l]);
-        try arr.append('\n');
+        try arr.appendSlice(allocator, b64[i .. i + l]);
+        try arr.append(allocator, '\n');
 
         i += l;
     }
 
-    try arr.appendSlice("-----END PRIVATE KEY-----\n");
+    try arr.appendSlice(allocator, "-----END PRIVATE KEY-----\n");
 
-    return try arr.toOwnedSlice();
+    return try arr.toOwnedSlice(allocator);
 }
 
 pub fn asymmetricKeyPairFromPem(pem: []const u8, allocator: std.mem.Allocator) !AsymmetricKeyPair {
@@ -69,13 +69,13 @@ pub fn asymmetricKeyPairFromPem(pem: []const u8, allocator: std.mem.Allocator) !
     if (!std.mem.containsAtLeast(u8, begin.?, 1, "BEGIN PRIVATE KEY"))
         return error.IsNotAPrivateKey;
 
-    var data = std.ArrayList(u8).init(allocator);
-    defer data.deinit();
+    var data: std.ArrayListUnmanaged(u8) = .empty;
+    defer data.deinit(allocator);
 
     while (iter.next()) |d| {
         if (std.mem.containsAtLeast(u8, d, 1, "END PRIVATE KEY")) break;
 
-        try data.appendSlice(d);
+        try data.appendSlice(allocator, d);
     }
 
     const l = try std.base64.standard.Decoder.calcSizeForSlice(data.items);

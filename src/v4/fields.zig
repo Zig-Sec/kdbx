@@ -160,14 +160,13 @@ pub const Field = union(FieldTag) {
     }
 
     /// Read a Field from a `Reader`.
-    pub fn readAlloc(reader: anytype, allocator: Allocator, j: *usize) !@This() {
-        const t = try reader.readByte();
+    pub fn readAlloc(reader: *std.Io.Reader, allocator: Allocator, j: *usize) !@This() {
+        const t = try reader.takeByte();
         j.* += 1;
-        const size: usize = @intCast(try reader.readInt(u32, .little));
+        const size: usize = @intCast(try reader.takeInt(u32, .little));
         j.* += 4;
         var m = try allocator.alloc(u8, size);
-        for (m) |*b| b.* = try reader.readByte();
-        //const m = try reader.readAllAlloc(allocator, size);
+        try reader.readSliceAll(m);
         defer allocator.free(m);
         j.* += m.len;
         if (m.len != size) return error.UnexpectedLength;
