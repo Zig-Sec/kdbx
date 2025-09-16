@@ -25,7 +25,7 @@ pub const InnerFieldTag = enum(u8) {
 pub const InnerHeader = struct {
     stream_cipher: StreamCipher,
     stream_key: []u8,
-    binary: std.ArrayList([]u8),
+    binary: std.ArrayListUnmanaged([]u8),
     allocator: Allocator,
 
     pub const StreamCipher = enum(u32) {
@@ -45,7 +45,7 @@ pub const InnerHeader = struct {
         }
     };
 
-    pub fn write(self: *const @This(), out: anytype) !void {
+    pub fn write(self: *const @This(), out: *std.Io.Writer) !void {
         try out.writeAll("\x01\x04\x00\x00\x00");
         try encode2(out, 4, @intFromEnum(self.stream_cipher));
 
@@ -69,15 +69,15 @@ pub const InnerHeader = struct {
         var stream_cipher: ?StreamCipher = null;
         var stream_key: ?[]u8 = null;
         errdefer if (stream_key) |sk| {
-            std.crypto.utils.secureZero(u8, sk);
+            std.crypto.secureZero(u8, sk);
             allocator.free(sk);
         };
-        var binary = std.ArrayList([]u8).init(allocator);
+        var binary: std.ArrayListUnmanaged([]u8) = .empty;
         for (binary.items) |e| {
-            std.crypto.utils.secureZero(u8, e);
+            std.crypto.secureZero(u8, e);
             allocator.free(e);
         }
-        errdefer binary.deinit();
+        errdefer binary.deinit(allocator);
 
         while (i.* < s.len) {
             if (i.* + 5 >= s.len) break;
@@ -107,7 +107,7 @@ pub const InnerHeader = struct {
                             return error.InnerHeaderInvalidBinaryFlag;
                         },
                     }
-                    try binary.append(try allocator.dupe(u8, m[1..]));
+                    try binary.append(allocator, try allocator.dupe(u8, m[1..]));
                 },
                 else => {},
             }
@@ -129,14 +129,14 @@ pub const InnerHeader = struct {
         };
     }
 
-    pub fn deinit(self: *const @This()) void {
-        std.crypto.utils.secureZero(u8, self.stream_key);
+    pub fn deinit(self: *@This()) void {
+        std.crypto.secureZero(u8, self.stream_key);
         self.allocator.free(self.stream_key);
 
         for (self.binary.items) |e| {
-            std.crypto.utils.secureZero(u8, e);
+            std.crypto.secureZero(u8, e);
             self.allocator.free(e);
         }
-        self.binary.deinit();
+        self.binary.deinit(self.allocator);
     }
 };

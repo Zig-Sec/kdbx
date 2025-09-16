@@ -51,11 +51,20 @@ pub const Field = union(FieldTag) {
     ///
     /// Please note that it is ChaCha20 and NOT XChaCha20 (the nonce
     /// extended version), i.e., don't generate the IV at random!
-    pub const Cipher = enum(u128) {
-        aes128_cbc = 0x35DDF83D563A748DC3416494A105AB61,
-        aes256_cbc = 0xFF5AFC6A210558BE504371BFE6F2C131,
-        twofish_cbc = 0x6C3465F97AD46AA3B94B6F579FF268AD,
-        chacha20 = 0x9AB5DB319A3324A5B54C6F8B2B8A03D6,
+    pub const Cipher = enum {
+        aes128_cbc,
+        aes256_cbc,
+        twofish_cbc,
+        chacha20,
+
+        pub fn toUint(self: *const @This()) u128 {
+            return switch (self.*) {
+                .aes128_cbc => 0x35DDF83D563A748DC3416494A105AB61,
+                .aes256_cbc => 0xFF5AFC6A210558BE504371BFE6F2C131,
+                .twofish_cbc => 0x6C3465F97AD46AA3B94B6F579FF268AD,
+                .chacha20 => 0x9AB5DB319A3324A5B54C6F8B2B8A03D6,
+            };
+        }
 
         pub fn fromSlice(s: []const u8) !@This() {
             if (s.len != 16) return error.InvalidSize;
@@ -102,10 +111,10 @@ pub const Field = union(FieldTag) {
     /// - Argon2d/id
     ///
     /// Please ignore AES-KDF and just use Argon2id for new databases!
-    pub const Kdf = enum(u128) {
-        aes_kdf = 0xea4f8ac1080d74bf60448a629af3d9c9,
-        argon2d = 0x0c0ae303a4a9f7914b44298cdf6d63ef,
-        argon2id = 0xe6a1f0c63efc3db27347db56198b299e,
+    pub const Kdf = enum {
+        aes_kdf,
+        argon2d,
+        argon2id,
     };
 
     pub const KdfParameters = union(KdfTag) {
@@ -160,14 +169,13 @@ pub const Field = union(FieldTag) {
     }
 
     /// Read a Field from a `Reader`.
-    pub fn readAlloc(reader: anytype, allocator: Allocator, j: *usize) !@This() {
-        const t = try reader.readByte();
+    pub fn readAlloc(reader: *std.Io.Reader, allocator: Allocator, j: *usize) !@This() {
+        const t = try reader.takeByte();
         j.* += 1;
-        const size: usize = @intCast(try reader.readInt(u32, .little));
+        const size: usize = @intCast(try reader.takeInt(u32, .little));
         j.* += 4;
         var m = try allocator.alloc(u8, size);
-        for (m) |*b| b.* = try reader.readByte();
-        //const m = try reader.readAllAlloc(allocator, size);
+        try reader.readSliceAll(m);
         defer allocator.free(m);
         j.* += m.len;
         if (m.len != size) return error.UnexpectedLength;

@@ -28,7 +28,7 @@ pub const HVersion = struct {
         return tmp;
     }
 
-    pub fn write(self: *const @This(), out: anytype) !void {
+    pub fn write(self: *const @This(), out: *std.Io.Writer) !void {
         try out.writeAll(self.raw[0..]);
     }
 
@@ -110,102 +110,101 @@ pub const Header = struct {
     // Call this function after changing the version or one of the
     // header fields.
     pub fn updateRawHeader(self: *@This()) !void {
-        var out_ = std.ArrayList(u8).init(self.allocator);
-        errdefer out_.deinit();
-        var out = out_.writer();
+        var out = std.Io.Writer.Allocating.init(self.allocator);
+        errdefer out.deinit();
 
-        try self.version.write(out);
+        try self.version.write(&out.writer);
 
         for (self.fields[0..]) |field_| {
             if (field_) |field| {
                 switch (field) {
                     .cipher_id => |id| {
-                        try out.writeAll("\x02\x10\x00\x00\x00");
-                        try encode2(out, 16, @intFromEnum(id));
+                        try out.writer.writeAll("\x02\x10\x00\x00\x00");
+                        try encode2(&out.writer, 16, id.toUint());
                     },
                     .compression => |comp| {
-                        try out.writeAll("\x03\x04\x00\x00\x00");
-                        try encode2(out, 4, @intFromEnum(comp));
+                        try out.writer.writeAll("\x03\x04\x00\x00\x00");
+                        try encode2(&out.writer, 4, @intFromEnum(comp));
                     },
                     .main_seed => |seed| {
-                        try out.writeByte(0x04);
-                        try encode2(out, 4, @as(u32, 32));
-                        try out.writeAll(seed[0..]);
+                        try out.writer.writeByte(0x04);
+                        try encode2(&out.writer, 4, @as(u32, 32));
+                        try out.writer.writeAll(seed[0..]);
                     },
                     .encryption_iv => |iv| {
-                        try out.writeByte(0x07);
+                        try out.writer.writeByte(0x07);
 
                         switch (self.getCipherId()) {
                             .aes128_cbc, .aes256_cbc, .twofish_cbc => {
-                                try encode2(out, 4, @as(u32, 16));
-                                try out.writeAll(iv[0..16]);
+                                try encode2(&out.writer, 4, @as(u32, 16));
+                                try out.writer.writeAll(iv[0..16]);
                             },
                             .chacha20 => {
-                                try encode2(out, 4, @as(u32, 12));
-                                try out.writeAll(iv[0..12]);
+                                try encode2(&out.writer, 4, @as(u32, 12));
+                                try out.writer.writeAll(iv[0..12]);
                             },
                         }
                     },
                     .kdf_parameters => |params| {
-                        try out.writeByte(0x0b);
+                        try out.writer.writeByte(0x0b);
 
                         switch (params) {
                             .aes => return error.SerializingAesKdfParametersNotSupported,
                             .argon2 => |argon2| {
-                                try out.writeAll("\x8b\x00\x00\x00"); // this is always the same
-                                try out.writeAll("\x00\x01"); // version
+                                try out.writer.writeAll("\x8b\x00\x00\x00"); // this is always the same
+                                try out.writer.writeAll("\x00\x01"); // version
 
                                 // $UUID
-                                try out.writeByte(0x42);
-                                try encode2(out, 4, @as(u32, 5));
-                                try out.writeAll("$UUID");
-                                try encode2(out, 4, @as(u32, 16));
+                                try out.writer.writeByte(0x42);
+                                try encode2(&out.writer, 4, @as(u32, 5));
+                                try out.writer.writeAll("$UUID");
+                                try encode2(&out.writer, 4, @as(u32, 16));
                                 switch (argon2.mode) {
-                                    .argon2d => try out.writeAll("\xef\x63\x6d\xdf\x8c\x29\x44\x4b\x91\xf7\xa9\xa4\x03\xe3\x0a\x0c"),
-                                    .argon2id => try out.writeAll("\x9e\x29\x8b\x19\x56\xdb\x47\x73\xb2\x3d\xfc\x3e\xc6\xf0\xa1\xe6"),
+                                    .argon2d => try out.writer.writeAll("\xef\x63\x6d\xdf\x8c\x29\x44\x4b\x91\xf7\xa9\xa4\x03\xe3\x0a\x0c"),
+                                    .argon2id => try out.writer.writeAll("\x9e\x29\x8b\x19\x56\xdb\x47\x73\xb2\x3d\xfc\x3e\xc6\xf0\xa1\xe6"),
                                     .argon2i => return error.KdfParamsArgon2iNotSupportedForSerialization,
                                 }
 
                                 // I
-                                try out.writeByte(0x05);
-                                try encode2(out, 4, @as(u32, 1));
-                                try out.writeByte('I');
-                                try encode2(out, 4, @as(u32, 8));
-                                try encode2(out, 8, argon2.i);
+                                try out.writer.writeByte(0x05);
+                                try encode2(&out.writer, 4, @as(u32, 1));
+                                try out.writer.writeByte('I');
+                                try encode2(&out.writer, 4, @as(u32, 8));
+                                try encode2(&out.writer, 8, argon2.i);
 
                                 // M
-                                try out.writeByte(0x05);
-                                try encode2(out, 4, @as(u32, 1));
-                                try out.writeByte('M');
-                                try encode2(out, 4, @as(u32, 8));
-                                try encode2(out, 8, argon2.m);
+                                try out.writer.writeByte(0x05);
+                                try encode2(&out.writer, 4, @as(u32, 1));
+                                try out.writer.writeByte('M');
+                                try encode2(&out.writer, 4, @as(u32, 8));
+                                try encode2(&out.writer, 8, argon2.m);
 
                                 // P
-                                try out.writeByte(0x04);
-                                try encode2(out, 4, @as(u32, 1));
-                                try out.writeByte('P');
-                                try encode2(out, 4, @as(u32, 4));
-                                try encode2(out, 4, argon2.p);
+                                try out.writer.writeByte(0x04);
+                                try encode2(&out.writer, 4, @as(u32, 1));
+                                try out.writer.writeByte('P');
+                                try encode2(&out.writer, 4, @as(u32, 4));
+                                try encode2(&out.writer, 4, argon2.p);
 
                                 // S
-                                try out.writeByte(0x42);
-                                try encode2(out, 4, @as(u32, 1));
-                                try out.writeByte('S');
-                                try encode2(out, 4, @as(u32, 32));
-                                try out.writeAll(argon2.s[0..]);
+                                try out.writer.writeByte(0x42);
+                                try encode2(&out.writer, 4, @as(u32, 1));
+                                try out.writer.writeByte('S');
+                                try encode2(&out.writer, 4, @as(u32, 32));
+                                try out.writer.writeAll(argon2.s[0..]);
 
                                 // V
-                                try out.writeByte(0x04);
-                                try encode2(out, 4, @as(u32, 1));
-                                try out.writeByte('V');
-                                try encode2(out, 4, @as(u32, 4));
-                                try encode2(out, 4, argon2.v);
+                                try out.writer.writeByte(0x04);
+                                try encode2(&out.writer, 4, @as(u32, 1));
+                                try out.writer.writeByte('V');
+                                try encode2(&out.writer, 4, @as(u32, 4));
+                                try encode2(&out.writer, 4, argon2.v);
 
                                 // TODO: do we need to care about k and a???
                             },
                         }
 
-                        try out.writeByte(0x00);
+                        try out.writer.writeByte(0x00);
                     },
                     .public_custom_data => {
                         return error.SerializingPublicCustomDataNotSupported;
@@ -218,9 +217,9 @@ pub const Header = struct {
         }
 
         // End of Heder
-        try out.writeAll("\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a");
+        try out.writer.writeAll("\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a");
 
-        const raw_header = try out_.toOwnedSlice();
+        const raw_header = try out.toOwnedSlice();
         self.allocator.free(self.raw_header);
         self.raw_header = raw_header;
     }
@@ -236,11 +235,11 @@ pub const Header = struct {
         );
     }
 
-    pub fn readAlloc(reader: anytype, allocator: Allocator) !@This() {
+    pub fn readAlloc(reader: *std.Io.Reader, allocator: Allocator) !@This() {
         var j: usize = 0;
         // Read and validate version
         var version: HVersion = undefined;
-        _ = reader.readAll(&version.raw) catch |e| {
+        _ = reader.readSliceAll(&version.raw) catch |e| {
             std.log.err("Header.read: error while reading version ({any})", .{e});
             return error.UnexpectedError;
         };
@@ -257,20 +256,20 @@ pub const Header = struct {
         }
 
         // First read header as we have to verify its integrity
-        var raw_header = std.ArrayList(u8).init(allocator);
+        var raw_header = std.Io.Writer.Allocating.init(allocator);
         errdefer raw_header.deinit();
-        try raw_header.appendSlice(&version.raw);
+        try raw_header.writer.writeAll(&version.raw);
 
         var before: u8 = 0;
         while (true) {
-            const byte = try reader.readByte();
-            try raw_header.append(byte);
+            const byte = try reader.takeByte();
+            try raw_header.writer.writeByte(byte);
 
-            if (before == 0x0d and byte == 0x0a and raw_header.items.len >= 9) {
+            if (before == 0x0d and byte == 0x0a and raw_header.written().len >= 9) {
                 if (std.mem.eql(
                     u8,
                     "\x00\x04\x00\x00\x00\x0d\x0a\x0d\x0a",
-                    raw_header.items[raw_header.items.len - 9 ..],
+                    raw_header.written()[raw_header.written().len - 9 ..],
                 )) break;
             }
 
@@ -278,19 +277,19 @@ pub const Header = struct {
         }
 
         var hash: [32]u8 = .{0} ** 32;
-        _ = try reader.readAll(&hash);
+        _ = try reader.readSliceAll(&hash);
 
         var mac: [32]u8 = .{0} ** 32;
-        _ = try reader.readAll(&mac);
+        _ = try reader.readSliceAll(&mac);
 
         var sha256_digest: [32]u8 = .{0} ** 32;
-        std.crypto.hash.sha2.Sha256.hash(raw_header.items, &sha256_digest, .{});
+        std.crypto.hash.sha2.Sha256.hash(raw_header.written(), &sha256_digest, .{});
         if (!std.mem.eql(u8, &hash, &sha256_digest)) return error.Integrity;
 
         // Now parse the header fields
-        var stream = std.io.fixedBufferStream(raw_header.items);
-        const stream_reader = stream.reader();
-        try stream_reader.skipBytes(12, .{}); // skip version
+        var stream = std.Io.Reader.fixed(raw_header.written());
+        const stream_reader = &stream;
+        try stream_reader.discardAll(12); // skip version
 
         var fields_: [6]?Field = .{null} ** 6;
         errdefer {
@@ -363,11 +362,11 @@ pub const Header = struct {
     ) !Keys {
         // Create composite key
         var composite_key: [32]u8 = .{0} ** 32;
-        defer std.crypto.utils.secureZero(u8, &composite_key);
+        defer std.crypto.secureZero(u8, &composite_key);
         var h = std.crypto.hash.sha2.Sha256.init(.{});
         if (database_key.password) |password| {
             var pwhash: [32]u8 = .{0} ** 32;
-            defer std.crypto.utils.secureZero(u8, &pwhash);
+            defer std.crypto.secureZero(u8, &pwhash);
             std.crypto.hash.sha2.Sha256.hash(password, &pwhash, .{});
             h.update(&pwhash);
         }
@@ -377,7 +376,7 @@ pub const Header = struct {
 
         // Generate pre-key
         var pre_key: [32]u8 = .{0} ** 32;
-        defer std.crypto.utils.secureZero(u8, &pre_key);
+        defer std.crypto.secureZero(u8, &pre_key);
         switch (self.getKdfParameters()) {
             .aes => {
                 return error.AesKdfNotImplemented;
@@ -404,7 +403,7 @@ pub const Header = struct {
 
         // Derive encryption key
         var encryption_key: [32]u8 = .{0} ** 32;
-        defer std.crypto.utils.secureZero(u8, &encryption_key);
+        defer std.crypto.secureZero(u8, &encryption_key);
         h = std.crypto.hash.sha2.Sha256.init(.{});
         h.update(&main_seed);
         h.update(&pre_key);
@@ -412,7 +411,7 @@ pub const Header = struct {
 
         // Derive master-mac key
         var mac_key: [64]u8 = .{0} ** 64;
-        defer std.crypto.utils.secureZero(u8, &mac_key);
+        defer std.crypto.secureZero(u8, &mac_key);
         var h2 = std.crypto.hash.sha2.Sha512.init(.{});
         h2.update(&main_seed);
         h2.update(&pre_key);

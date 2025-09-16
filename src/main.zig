@@ -7,9 +7,17 @@ const VERSION = "0.1.0";
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 
-const stdin = std.io.getStdIn();
-const stdout = std.io.getStdOut();
-const stderr = std.io.getStdErr();
+var stdout_buffer: [1024]u8 = undefined;
+var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+const stdout = &stdout_writer.interface;
+
+var stderr_buffer: [1024]u8 = undefined;
+var stderr_writer = std.fs.File.stdout().writer(&stderr_buffer);
+const stderr = &stderr_writer.interface;
+
+var stdin_buffer: [1024]u8 = undefined;
+var stdin_reader = std.fs.File.stdin().reader(&stdin_buffer);
+const stdin = &stdin_reader.interface;
 
 pub fn main() !void {
     var password: ?[]u8 = null;
@@ -35,13 +43,13 @@ pub fn main() !void {
         .allocator = gpa.allocator(),
     }) catch |err| {
         // Report useful error and exit
-        diag.report(std.io.getStdErr().writer(), err) catch {};
+        diag.report(stderr, err) catch {};
         return;
     };
     defer res.deinit();
 
     if (res.args.help != 0) {
-        try std.fmt.format(stdout.writer(), help_text, .{VERSION});
+        try stdout.print(help_text, .{VERSION});
         return;
     }
     if (res.args.password) |p| {
@@ -153,11 +161,11 @@ fn save(path: []const u8, database: *kdbx.Database, res: anytype) void {
     };
     defer db_key.deinit();
 
-    var raw = std.ArrayList(u8).init(allocator);
+    var raw = std.Io.Writer.Allocating.init(allocator);
     defer raw.deinit();
 
     database.save(
-        raw.writer(),
+        &raw.writer,
         db_key,
         allocator,
     ) catch |e| {
@@ -171,7 +179,7 @@ fn save(path: []const u8, database: *kdbx.Database, res: anytype) void {
     };
     defer file.close();
 
-    file.writeAll(raw.items) catch |e| {
+    file.writeAll(raw.written()) catch |e| {
         std.log.err("unable to write file '{s}' ({any})", .{ path, e });
         return;
     };

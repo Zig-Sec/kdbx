@@ -14,45 +14,43 @@ pub const Body = struct {
     allocator: Allocator,
 
     pub fn readAlloc(
-        reader: anytype,
+        reader: *std.Io.Reader,
         header: *const Header,
         keys: *const Keys,
         allocator: Allocator,
     ) !@This() {
-        var inner = std.ArrayList(u8).init(allocator);
+        var inner = std.Io.Writer.Allocating.init(allocator);
         defer inner.deinit();
 
         var i: u64 = 0;
         while (true) : (i += 1) {
             var mac: [32]u8 = .{0} ** 32;
-            _ = reader.readAll(&mac) catch |e| {
+            _ = reader.readSliceAll(&mac) catch |e| {
                 std.log.err("unable to read mac of block {d}", .{i});
                 return e;
             };
 
-            const len = reader.readInt(u32, .little) catch |e| {
+            const len = reader.takeInt(u32, .little) catch |e| {
                 std.log.err("unable to read length of block {d}", .{i});
                 return e;
             };
 
-            const curr = inner.items.len;
+            const curr = inner.written().len;
 
-            // TODO: make this more efficient
-            for (0..len) |_| {
-                try inner.append(try reader.readByte());
-            }
+            _ = try reader.streamExact(&inner.writer, len);
 
             var raw_block_index: [8]u8 = undefined;
             std.mem.writeInt(u64, &raw_block_index, i, .little);
             var raw_block_len: [4]u8 = undefined;
             std.mem.writeInt(u32, &raw_block_len, len, .little);
 
-            keys.checkMac(&mac, &.{ &raw_block_index, &raw_block_len, inner.items[curr..] }, i) catch |e| {
+            keys.checkMac(&mac, &.{ &raw_block_index, &raw_block_len, inner.written()[curr..] }, i) catch |e| {
                 std.log.err("unable to verify authenticity of block {d}", .{i});
                 return e;
             };
 
             // Break if length is less than 1MiB
+            // TODO: check for ENDING
             if (len < 1048576) break;
         }
 
@@ -68,11 +66,11 @@ pub const Body = struct {
                 @memcpy(&xor_vector, iv[0..16]);
                 var ctx = std.crypto.core.aes.Aes256.initDec(keys.ekey);
 
-                while (j < inner.items.len) : (j += 16) {
+                while (j < inner.written().len) : (j += 16) {
                     var data: [16]u8 = .{0} ** 16;
-                    const offset = if (j + 16 <= inner.items.len) 16 else inner.items.len - j;
+                    const offset = if (j + 16 <= inner.written().len) 16 else inner.written().len - j;
                     var in_: [16]u8 = .{0} ** 16;
-                    @memcpy(in_[0..offset], inner.items[j .. j + offset]);
+                    @memcpy(in_[0..offset], inner.written()[j .. j + offset]);
 
                     ctx.decrypt(data[0..], &in_);
                     for (&data, xor_vector) |*b1, b2| {
@@ -82,9 +80,9 @@ pub const Body = struct {
                     // This could be bad if a block is not divisible by 16 but
                     // this will only happen for the last block, i.e.,
                     // doesn't affect the CBC decryption.
-                    @memcpy(xor_vector[0..offset], inner.items[j .. j + offset]);
+                    @memcpy(xor_vector[0..offset], inner.written()[j .. j + offset]);
 
-                    @memcpy(inner.items[j .. j + offset], data[0..offset]);
+                    @memcpy(inner.written()[j .. j + offset], data[0..offset]);
                 }
             },
         }
@@ -92,15 +90,17 @@ pub const Body = struct {
         switch (header.getCompression()) {
             .none => {},
             .gzip => {
-                var in_stream = std.io.fixedBufferStream(inner.items);
+                var in_stream = std.Io.Reader.fixed(inner.written());
 
-                var decompressed = std.ArrayList(u8).init(allocator);
+                var decompressed = std.Io.Writer.Allocating.init(allocator);
                 errdefer decompressed.deinit();
 
-                try std.compress.gzip.decompress(
-                    in_stream.reader(),
-                    decompressed.writer(),
+                var decomp = std.compress.flate.Decompress.init(
+                    &in_stream,
+                    .gzip,
+                    &.{},
                 );
+                _ = try decomp.reader.streamRemaining(&decompressed.writer);
 
                 inner.deinit();
                 inner = decompressed;
@@ -109,7 +109,7 @@ pub const Body = struct {
 
         var k: usize = 0;
         const inner_header = try InnerHeader.readAlloc(
-            inner.items,
+            inner.written(),
             allocator,
             &k,
         );
@@ -118,13 +118,13 @@ pub const Body = struct {
 
         return @This(){
             .inner_header = inner_header,
-            .xml = try allocator.dupe(u8, inner.items[k..]),
+            .xml = try allocator.dupe(u8, inner.written()[k..]),
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *@This()) void {
-        std.crypto.utils.secureZero(u8, self.xml);
+        std.crypto.secureZero(u8, self.xml);
         self.allocator.free(self.xml);
 
         self.inner_header.deinit();

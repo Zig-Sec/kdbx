@@ -5,8 +5,8 @@ pub const Keys = struct {
     mkey: [64]u8 = .{0} ** 64,
 
     pub fn deinit(self: *@This()) void {
-        std.crypto.utils.secureZero(u8, &self.ekey);
-        std.crypto.utils.secureZero(u8, &self.mkey);
+        std.crypto.secureZero(u8, &self.ekey);
+        std.crypto.secureZero(u8, &self.mkey);
     }
 
     pub fn getBlockKey(self: *const @This(), index: u64) [64]u8 {
@@ -28,7 +28,7 @@ pub const Keys = struct {
         index: u64,
     ) [32]u8 {
         var k = self.getBlockKey(index);
-        defer std.crypto.utils.secureZero(u8, &k);
+        defer std.crypto.secureZero(u8, &k);
 
         const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
         var mac: [HmacSha256.mac_length]u8 = undefined;
@@ -48,11 +48,11 @@ pub const Keys = struct {
         index: u64,
     ) !void {
         var k = self.getBlockKey(index);
-        defer std.crypto.utils.secureZero(u8, &k);
+        defer std.crypto.secureZero(u8, &k);
 
         const HmacSha256 = std.crypto.auth.hmac.sha2.HmacSha256;
         var mac: [HmacSha256.mac_length]u8 = undefined;
-        defer std.crypto.utils.secureZero(u8, &mac);
+        defer std.crypto.secureZero(u8, &mac);
         var ctx = HmacSha256.init(&k);
         for (data) |d| {
             ctx.update(d);

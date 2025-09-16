@@ -23,14 +23,14 @@ pub const XML = struct {
     meta: Meta,
     root: Group,
 
-    pub fn deinit(self: *const @This()) void {
+    pub fn deinit(self: *@This()) void {
         self.meta.deinit();
         self.root.deinit();
     }
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         cipher: *ChaCha20,
     ) !void {
         try out.writeAll("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n");
@@ -73,7 +73,7 @@ pub const Meta = struct {
         protect_url: bool = false,
         protect_notes: bool = false,
     } = .{},
-    custom_icons: ?std.ArrayList(Icon) = null,
+    custom_icons: ?std.ArrayListUnmanaged(Icon) = null,
     recycle_bin_enabled: bool = true,
     recycle_bin_uuid: Uuid.Uuid = 0,
     recycle_bin_changed: i64,
@@ -84,12 +84,12 @@ pub const Meta = struct {
     history_max_items: i64 = 10,
     history_max_size: i64 = 6291456,
     settings_changed: i64,
-    custom_data: std.ArrayList(KeyValue),
+    custom_data: std.ArrayListUnmanaged(KeyValue),
     allocator: Allocator,
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
     ) !void {
         for (0..level * XML_INDENT) |_| try out.writeByte(' ');
@@ -305,35 +305,35 @@ pub const Meta = struct {
         try out.writeAll("</Meta>\n");
     }
 
-    pub fn deinit(self: *const @This()) void {
-        std.crypto.utils.secureZero(u8, self.generator);
+    pub fn deinit(self: *@This()) void {
+        std.crypto.secureZero(u8, self.generator);
         self.allocator.free(self.generator);
 
-        std.crypto.utils.secureZero(u8, self.database_name);
+        std.crypto.secureZero(u8, self.database_name);
         self.allocator.free(self.database_name);
 
         if (self.database_description) |desc| {
-            std.crypto.utils.secureZero(u8, desc);
+            std.crypto.secureZero(u8, desc);
             self.allocator.free(desc);
         }
 
         if (self.default_user_name) |desc| {
-            std.crypto.utils.secureZero(u8, desc);
+            std.crypto.secureZero(u8, desc);
             self.allocator.free(desc);
         }
 
         if (self.color) |desc| {
-            std.crypto.utils.secureZero(u8, desc);
+            std.crypto.secureZero(u8, desc);
             self.allocator.free(desc);
         }
 
-        if (self.custom_icons) |icon| {
-            for (icon.items) |data| data.deinit(self.allocator);
-            icon.deinit();
+        if (self.custom_icons) |*icon| {
+            for (icon.items) |*data| data.deinit(self.allocator);
+            icon.deinit(self.allocator);
         }
 
-        for (self.custom_data.items) |data| data.deinit(self.allocator);
-        self.custom_data.deinit();
+        for (self.custom_data.items) |*data| data.deinit(self.allocator);
+        self.custom_data.deinit(self.allocator);
     }
 };
 
@@ -343,7 +343,7 @@ pub const Binary = struct {
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         allocator: Allocator,
     ) !void {
@@ -364,8 +364,8 @@ pub const Binary = struct {
         try out.writeAll("</Binary>\n");
     }
 
-    pub fn deinit(self: *const @This(), allocator: Allocator) void {
-        std.crypto.utils.secureZero(u8, self.key);
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
+        std.crypto.secureZero(u8, self.key);
         allocator.free(self.key);
     }
 };
@@ -377,7 +377,7 @@ pub const Icon = struct {
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         allocator: Allocator,
     ) !void {
@@ -403,8 +403,8 @@ pub const Icon = struct {
         try out.writeAll("</Icon>\n");
     }
 
-    pub fn deinit(self: *const @This(), allocator: Allocator) void {
-        std.crypto.utils.secureZero(u8, self.data);
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
+        std.crypto.secureZero(u8, self.data);
         allocator.free(self.data);
     }
 };
@@ -415,16 +415,16 @@ pub const KeyValue = struct {
     last_modification_time: ?i64 = null,
     protected: bool = false,
 
-    pub fn deinit(self: *const @This(), allocator: Allocator) void {
-        std.crypto.utils.secureZero(u8, self.key);
-        std.crypto.utils.secureZero(u8, self.value);
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
+        std.crypto.secureZero(u8, self.key);
+        std.crypto.secureZero(u8, self.value);
         allocator.free(self.key);
         allocator.free(self.value);
     }
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         allocator: Allocator,
         cipher: *ChaCha20,
@@ -443,7 +443,7 @@ pub const KeyValue = struct {
                 try out.writeAll("<Value Protected=\"True\">");
                 const m = try allocator.dupe(u8, self.value);
                 defer {
-                    std.crypto.utils.secureZero(u8, m);
+                    std.crypto.secureZero(u8, m);
                     allocator.free(m);
                 }
                 cipher.xor(m);
@@ -482,8 +482,8 @@ pub const Group = struct {
     enable_searching: ?bool = null,
     last_top_visible_entry: Uuid.Uuid,
     previous_parent_group: ?Uuid.Uuid = null,
-    entries: std.ArrayList(Entry),
-    groups: std.ArrayList(Group),
+    entries: std.ArrayListUnmanaged(Entry),
+    groups: std.ArrayListUnmanaged(Group),
     allocator: Allocator,
 
     pub const IteratorTag = enum { entry, group };
@@ -583,11 +583,11 @@ pub const Group = struct {
                 return error.EntryAlreadyExists;
         }
 
-        try self.entries.append(entry);
+        try self.entries.append(self.allocator, entry);
     }
 
     pub fn createEntry(self: *@This()) !*Entry {
-        try self.entries.append(Entry.new(self.allocator));
+        try self.entries.append(self.allocator, Entry.new(self.allocator));
         return &self.entries.items[self.entries.items.len - 1];
     }
 
@@ -601,7 +601,10 @@ pub const Group = struct {
     }
 
     pub fn createGroup(self: *@This(), name: []const u8) !*@This() {
-        try self.groups.append(try Group.new(name, self.allocator));
+        try self.groups.append(
+            self.allocator,
+            try Group.new(name, self.allocator),
+        );
         return &self.groups.items[self.groups.items.len - 1];
     }
 
@@ -611,8 +614,8 @@ pub const Group = struct {
             .uuid = Uuid.v4.new(),
             .icon_id = 48,
             .times = Times.new(),
-            .entries = std.ArrayList(Entry).init(allocator),
-            .groups = std.ArrayList(Group).init(allocator),
+            .entries = .empty,
+            .groups = .empty,
             .last_top_visible_entry = 0,
             .allocator = allocator,
         };
@@ -620,7 +623,7 @@ pub const Group = struct {
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         cipher: *ChaCha20,
     ) !void {
@@ -717,29 +720,29 @@ pub const Group = struct {
         try out.writeAll("</Group>\n");
     }
 
-    pub fn deinit(self: *const @This()) void {
-        std.crypto.utils.secureZero(u8, self.name);
+    pub fn deinit(self: *@This()) void {
+        std.crypto.secureZero(u8, self.name);
         self.allocator.free(self.name);
 
         if (self.notes) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
 
         if (self.default_auto_type_sequence) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
 
-        for (self.entries.items) |e| {
+        for (self.entries.items) |*e| {
             e.deinit();
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
 
-        for (self.groups.items) |g| {
+        for (self.groups.items) |*g| {
             g.deinit();
         }
-        self.groups.deinit();
+        self.groups.deinit(self.allocator);
     }
 };
 
@@ -752,10 +755,10 @@ pub const Entry = struct {
     override_url: ?[]u8 = null,
     tags: ?[]u8 = null,
     times: Times,
-    strings: std.ArrayList(KeyValue),
-    binaries: std.ArrayList(Binary),
+    strings: std.ArrayListUnmanaged(KeyValue),
+    binaries: std.ArrayListUnmanaged(Binary),
     auto_type: ?AutoType = null,
-    history: ?std.ArrayList(Entry) = null,
+    history: ?std.ArrayListUnmanaged(Entry) = null,
     allocator: Allocator,
 
     pub fn new(allocator: Allocator) @This() {
@@ -763,8 +766,8 @@ pub const Entry = struct {
             .uuid = Uuid.v4.new(),
             .icon_id = 0,
             .times = Times.new(),
-            .strings = std.ArrayList(KeyValue).init(allocator),
-            .binaries = std.ArrayList(Binary).init(allocator),
+            .strings = .empty,
+            .binaries = .empty,
             .allocator = allocator,
         };
     }
@@ -812,9 +815,9 @@ pub const Entry = struct {
         user_id: []const u8,
         pem_key: []const u8,
     ) !void {
-        var uid = std.ArrayList(u8).init(self.allocator);
+        var uid = std.Io.Writer.Allocating.init(self.allocator);
         defer uid.deinit();
-        try writeBase64(uid.writer(), user_id, self.allocator);
+        try writeBase64(&uid.writer, user_id, self.allocator);
 
         // The uuid of the entry is also the credential id of the passkey
         try self.set("KPEX_PASSKEY_CREDENTIAL_ID", Uuid.urn.serialize(self.uuid)[0..], true);
@@ -823,7 +826,7 @@ pub const Entry = struct {
 
         try self.set("KPEX_PASSKEY_USERNAME", user_name, true);
 
-        try self.set("KPEX_PASSKEY_USER_HANDLE", uid.items, true);
+        try self.set("KPEX_PASSKEY_USER_HANDLE", uid.written(), true);
 
         try self.set("KPEX_PASSKEY_PRIVATE_KEY_PEM", pem_key, true);
 
@@ -879,12 +882,15 @@ pub const Entry = struct {
         const v = try self.allocator.dupe(u8, value);
         errdefer self.allocator.free(v);
 
-        try self.strings.append(.{ .key = k, .value = v, .protected = protect });
+        try self.strings.append(
+            self.allocator,
+            .{ .key = k, .value = v, .protected = protect },
+        );
     }
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         cipher: *ChaCha20,
     ) !void {
@@ -966,38 +972,38 @@ pub const Entry = struct {
         try out.writeAll("</Entry>\n");
     }
 
-    pub fn deinit(self: *const @This()) void {
+    pub fn deinit(self: *@This()) void {
         if (self.foreground_color) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
         if (self.background_color) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
         if (self.override_url) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
         if (self.tags) |v| {
-            std.crypto.utils.secureZero(u8, v);
+            std.crypto.secureZero(u8, v);
             self.allocator.free(v);
         }
-        for (self.strings.items) |kv| {
+        for (self.strings.items) |*kv| {
             kv.deinit(self.allocator);
         }
-        self.strings.deinit();
-        for (self.binaries.items) |kv| {
+        self.strings.deinit(self.allocator);
+        for (self.binaries.items) |*kv| {
             kv.deinit(self.allocator);
         }
-        self.binaries.deinit();
-        if (self.auto_type) |v| v.deinit(self.allocator);
+        self.binaries.deinit(self.allocator);
+        if (self.auto_type) |*v| v.deinit(self.allocator);
 
-        if (self.history) |h| {
-            for (h.items) |kv| {
+        if (self.history) |*h| {
+            for (h.items) |*kv| {
                 kv.deinit();
             }
-            h.deinit();
+            h.deinit(self.allocator);
         }
     }
 };
@@ -1026,7 +1032,7 @@ pub const Times = struct {
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         allocator: Allocator,
     ) !void {
@@ -1078,13 +1084,13 @@ pub const AutoType = struct {
     data_transfer_obfuscation: i64 = 0,
     default_sequence: ?[]u8 = null,
 
-    pub fn deinit(self: *const @This(), allocator: Allocator) void {
+    pub fn deinit(self: *@This(), allocator: Allocator) void {
         if (self.default_sequence) |s| allocator.free(s);
     }
 
     pub fn toXml(
         self: *const @This(),
-        out: anytype,
+        out: *std.Io.Writer,
         level: usize,
         allocator: Allocator,
     ) !void {
@@ -1124,7 +1130,7 @@ pub fn parseXml(self: *const Body, allocator: Allocator) !XML {
     const meta = file.?.tree.?.elementByTagName("Meta");
     if (meta == null) return error.MetaTagMissing;
 
-    const meta_ = try parseMeta(meta.?, allocator);
+    var meta_ = try parseMeta(meta.?, allocator);
     errdefer meta_.deinit();
 
     const root_ = file.?.tree.?.elementByTagName("Root");
@@ -1162,13 +1168,13 @@ fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
 
     const name = try fetchTagValue(elem, "Name", allocator);
     errdefer {
-        std.crypto.utils.secureZero(u8, name);
+        std.crypto.secureZero(u8, name);
         allocator.free(name);
     }
 
     const notes = try fetchTagValueNull(elem, "Notes", allocator);
     errdefer if (notes) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1202,7 +1208,7 @@ fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
 
     const default_auto_type_sequence = try fetchTagValueNull(elem, "DefaultAutoTypeSequence", allocator);
     errdefer if (default_auto_type_sequence) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1220,14 +1226,17 @@ fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
     const entries = try elem.tree.?.elementsByTagNameAlloc(allocator, "Entry");
     defer allocator.free(entries);
 
-    var entries_array = std.ArrayList(Entry).init(allocator);
+    var entries_array: std.ArrayListUnmanaged(Entry) = .empty;
     errdefer {
-        for (entries_array.items) |item| item.deinit();
-        entries_array.deinit();
+        for (entries_array.items) |*item| item.deinit();
+        entries_array.deinit(allocator);
     }
 
     for (entries) |entry| {
-        try entries_array.append(try parseEntry(entry, allocator, cipher));
+        try entries_array.append(
+            allocator,
+            try parseEntry(entry, allocator, cipher),
+        );
     }
 
     // Parse all groups
@@ -1235,14 +1244,17 @@ fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
     const groups = try elem.tree.?.elementsByTagNameAlloc(allocator, "Group");
     defer allocator.free(groups);
 
-    var groups_array = std.ArrayList(Group).init(allocator);
+    var groups_array: std.ArrayListUnmanaged(Group) = .empty;
     errdefer {
-        for (groups_array.items) |item| item.deinit();
-        groups_array.deinit();
+        for (groups_array.items) |*item| item.deinit();
+        groups_array.deinit(allocator);
     }
 
     for (groups) |group| {
-        try groups_array.append(try parseGroup(group, allocator, cipher));
+        try groups_array.append(
+            allocator,
+            try parseGroup(group, allocator, cipher),
+        );
     }
 
     return .{
@@ -1292,25 +1304,25 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
 
     const foreground_color = try fetchTagValueNull(elem, "ForegroundColor", allocator);
     errdefer if (foreground_color) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
     const background_color = try fetchTagValueNull(elem, "BackgroundColor", allocator);
     errdefer if (background_color) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
     const override_url = try fetchTagValueNull(elem, "OverrideURL", allocator);
     errdefer if (override_url) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
     const tags = try fetchTagValueNull(elem, "Tags", allocator);
     errdefer if (tags) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1338,10 +1350,10 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
     var location_changed = try fetchTimeTag(times.?, "LocationChanged", allocator);
     errdefer location_changed = 0;
 
-    var strings = std.ArrayList(KeyValue).init(allocator);
+    var strings: std.ArrayListUnmanaged(KeyValue) = .empty;
     errdefer {
-        for (strings.items) |item| item.deinit(allocator);
-        strings.deinit();
+        for (strings.items) |*item| item.deinit(allocator);
+        strings.deinit(allocator);
     }
 
     const strings_ = try elem.tree.?.elementsByTagNameAlloc(allocator, "String");
@@ -1371,17 +1383,20 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
             protected = true;
         }
 
-        try strings.append(KeyValue{
-            .key = key,
-            .value = value,
-            .protected = protected,
-        });
+        try strings.append(
+            allocator,
+            KeyValue{
+                .key = key,
+                .value = value,
+                .protected = protected,
+            },
+        );
     }
 
-    var binaries = std.ArrayList(Binary).init(allocator);
+    var binaries: std.ArrayListUnmanaged(Binary) = .empty;
     errdefer {
-        for (binaries.items) |item| item.deinit(allocator);
-        binaries.deinit();
+        for (binaries.items) |*item| item.deinit(allocator);
+        binaries.deinit(allocator);
     }
 
     const binaries_ = try elem.tree.?.elementsByTagNameAlloc(allocator, "Binary");
@@ -1406,10 +1421,13 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
         }
         const index = try std.fmt.parseInt(usize, ref.?, 0);
 
-        try binaries.append(.{
-            .key = key,
-            .value = index,
-        });
+        try binaries.append(
+            allocator,
+            .{
+                .key = key,
+                .value = index,
+            },
+        );
     }
 
     const auto_type = elem.tree.?.elementByTagName("AutoType");
@@ -1431,10 +1449,10 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
         }
     }
 
-    var history: ?std.ArrayList(Entry) = null;
-    errdefer if (history) |h| {
-        for (h.items) |item| item.deinit();
-        h.deinit();
+    var history: ?std.ArrayListUnmanaged(Entry) = null;
+    errdefer if (history) |*h| {
+        for (h.items) |*item| item.deinit();
+        h.deinit(allocator);
     };
 
     const hist = elem.tree.?.elementByTagName("History");
@@ -1446,10 +1464,13 @@ fn parseEntry(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
 
         if (entries.len == 0) break :outer; // nothing to-do
 
-        history = std.ArrayList(Entry).init(allocator);
+        history = .empty;
 
         for (entries) |entry| {
-            try history.?.append(try parseEntry(entry, allocator, cipher));
+            try history.?.append(
+                allocator,
+                try parseEntry(entry, allocator, cipher),
+            );
         }
     }
 
@@ -1483,13 +1504,13 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
 
     const generator = try fetchTagValue(elem, "Generator", allocator);
     errdefer {
-        std.crypto.utils.secureZero(u8, generator);
+        std.crypto.secureZero(u8, generator);
         allocator.free(generator);
     }
 
     const database_name = try fetchTagValue(elem, "DatabaseName", allocator);
     errdefer {
-        std.crypto.utils.secureZero(u8, database_name);
+        std.crypto.secureZero(u8, database_name);
         allocator.free(database_name);
     }
 
@@ -1498,7 +1519,7 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
 
     const database_description = try fetchTagValueNull(elem, "DatabaseDescription", allocator);
     errdefer if (database_description) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1507,7 +1528,7 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
 
     const default_user_name = try fetchTagValueNull(elem, "DefaultUserName", allocator);
     errdefer if (default_user_name) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1519,7 +1540,7 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
 
     const color = try fetchTagValueNull(elem, "Color", allocator);
     errdefer if (color) |v| {
-        std.crypto.utils.secureZero(u8, v);
+        std.crypto.secureZero(u8, v);
         allocator.free(v);
     };
 
@@ -1540,11 +1561,11 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
     const protect_url = try fetchBool(protection.?, "ProtectURL", allocator);
     const protect_notes = try fetchBool(protection.?, "ProtectNotes", allocator);
 
-    var custom_icons: ?std.ArrayList(Icon) = null;
+    var custom_icons: ?std.ArrayListUnmanaged(Icon) = null;
     errdefer {
-        if (custom_icons) |icos| {
-            for (icos.items) |ico| ico.deinit(allocator);
-            icos.deinit();
+        if (custom_icons) |*icos| {
+            for (icos.items) |*ico| ico.deinit(allocator);
+            icos.deinit(allocator);
         }
     }
 
@@ -1557,9 +1578,12 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
 
         if (icons.len == 0) break :outer;
 
-        custom_icons = std.ArrayList(Icon).init(allocator);
+        custom_icons = .empty;
 
-        for (icons) |icon| try custom_icons.?.append(try parseIcon(icon, allocator));
+        for (icons) |icon| try custom_icons.?.append(
+            allocator,
+            try parseIcon(icon, allocator),
+        );
     }
 
     const recycle_bin_enabled = try fetchBool(elem, "RecycleBinEnabled", allocator);
@@ -1587,10 +1611,10 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
     var settings_changed = try fetchTimeTag(elem, "SettingsChanged", allocator);
     errdefer settings_changed = 0;
 
-    var custom_data = std.ArrayList(KeyValue).init(allocator);
+    var custom_data: std.ArrayListUnmanaged(KeyValue) = .empty;
     errdefer {
-        for (custom_data.items) |item| item.deinit(allocator);
-        custom_data.deinit();
+        for (custom_data.items) |*item| item.deinit(allocator);
+        custom_data.deinit(allocator);
     }
 
     const custom_data_ = elem.tree.?.elementByTagName("CustomData");
@@ -1607,11 +1631,14 @@ fn parseMeta(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Meta 
             errdefer allocator.free(value);
             const lmt = fetchTimeTag(elem, "SettingsChanged", allocator) catch null;
 
-            try custom_data.append(KeyValue{
-                .key = key,
-                .value = value,
-                .last_modification_time = lmt,
-            });
+            try custom_data.append(
+                allocator,
+                KeyValue{
+                    .key = key,
+                    .value = value,
+                    .last_modification_time = lmt,
+                },
+            );
         }
     }
 
@@ -1714,27 +1741,27 @@ fn fetchUuid(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator:
 
 // ------------------------------ Serialize -------------------------------
 
-pub fn writeBool(out: anytype, v: bool) !void {
+pub fn writeBool(out: *std.Io.Writer, v: bool) !void {
     try out.writeAll(if (v) "True" else "False");
 }
 
-pub fn writeI64(out: anytype, v: i64, allocator: Allocator) !void {
+pub fn writeI64(out: *std.Io.Writer, v: i64, allocator: Allocator) !void {
     var v_: [8]u8 = undefined;
     std.mem.writeInt(i64, &v_, v, .little);
     try writeBase64(out, v_[0..], allocator);
 }
 
-pub fn writeUuid(out: anytype, uuid: Uuid.Uuid, allocator: Allocator) !void {
+pub fn writeUuid(out: *std.Io.Writer, uuid: Uuid.Uuid, allocator: Allocator) !void {
     var uuid_: [16]u8 = undefined;
     std.mem.writeInt(Uuid.Uuid, &uuid_, uuid, .little);
     try writeBase64(out, uuid_[0..], allocator);
 }
 
-pub fn writeBase64(out: anytype, in: []const u8, allocator: Allocator) !void {
+pub fn writeBase64(out: *std.Io.Writer, in: []const u8, allocator: Allocator) !void {
     const l = std.base64.standard.Encoder.calcSize(in.len);
     const m = try allocator.alloc(u8, l);
     defer {
-        std.crypto.utils.secureZero(u8, m);
+        std.crypto.secureZero(u8, m);
         allocator.free(m);
     }
     _ = std.base64.standard.Encoder.encode(m, in);
@@ -1744,8 +1771,8 @@ pub fn writeBase64(out: anytype, in: []const u8, allocator: Allocator) !void {
 test "write uuid #1" {
     // D/LLsWnVT9q7aNpnKR3LBw==
     const id = try Uuid.urn.deserialize("0ff2cbb1-69d5-4fda-bb68-da67291dcb07");
-    var arr = std.ArrayList(u8).init(std.testing.allocator);
+    var arr = std.Io.Writer.Allocating.init(std.testing.allocator);
     defer arr.deinit();
-    try writeUuid(arr.writer(), id, std.testing.allocator);
-    try std.testing.expectEqualSlices(u8, "D/LLsWnVT9q7aNpnKR3LBw==", arr.items);
+    try writeUuid(&arr.writer, id, std.testing.allocator);
+    try std.testing.expectEqualSlices(u8, "D/LLsWnVT9q7aNpnKR3LBw==", arr.written());
 }
