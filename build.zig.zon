@@ -34,9 +34,8 @@
             .hash = "uuid-0.4.0-oOieIR2AAAChAUVBY4ABjYI1XN0EbVALmiN0JIlggC3i",
         },
         .dishwasher = .{
-            //.url = "https://github.com/edqx/dishwasher/archive/refs/tags/1.0.7.tar.gz",
-            //.hash = "dishwasher-2.0.0-aXVByeyCAQBuf9acPDoFACdxIfpbzkRdvcz_QNM6XZDU",
-            .path = "../dishwasher",
+            .url = "git+https://github.com/edqx/dishwasher#f25e60da10e9d374017f23e829b782496d4f0331",
+            .hash = "dishwasher-2.0.0-aXVBybymAQDzgein7twdj39GDRWJeTeG9tYAe11_G45p",
         },
     },
 

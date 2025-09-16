@@ -48,6 +48,7 @@ const allocator = gpa.allocator();
 pub fn main() !void {
     var f = try std.fs.cwd().openFile("test.kdbx", .{});
     defer f.close();
+    var reader  = f.reader(&.{});
 
     const db_key = kdbx.DatabaseKey{
         .password = try allocator.dupe(u8, "1234"),
@@ -55,7 +56,7 @@ pub fn main() !void {
     };
     defer db_key.deinit();
 
-    var database = try Database.open(f.reader(), .{
+    var database = try Database.open(&reader, .{
         .allocator = allocator,
         .key = db_key,
     });
@@ -124,9 +125,9 @@ pub fn main() !void {
     // a database object. The function expects a writer as the first
     // argument. This makes it easy to write the database to different
     // container types (e.g. a ArrayList as seen below) or a file.
-    var saved_db = std.ArrayList(u8).init(allocator);
+    var saved_db = std.Io.Writer.Allocating.init(allocator);
     defer saved_db.deinit();
 
-    try database.save(saved_db.writer(), db_key, allocator);
+    try database.save(&saved_db.writer, db_key, allocator);
 }
 ```

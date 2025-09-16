@@ -120,7 +120,7 @@ pub const Header = struct {
                 switch (field) {
                     .cipher_id => |id| {
                         try out.writer.writeAll("\x02\x10\x00\x00\x00");
-                        try encode2(&out.writer, 16, @intFromEnum(id));
+                        try encode2(&out.writer, 16, id.toUint());
                     },
                     .compression => |comp| {
                         try out.writer.writeAll("\x03\x04\x00\x00\x00");

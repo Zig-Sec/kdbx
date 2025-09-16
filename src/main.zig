@@ -49,7 +49,7 @@ pub fn main() !void {
     defer res.deinit();
 
     if (res.args.help != 0) {
-        try std.fmt.format(stdout, help_text, .{VERSION});
+        try stdout.print(help_text, .{VERSION});
         return;
     }
     if (res.args.password) |p| {
@@ -161,11 +161,11 @@ fn save(path: []const u8, database: *kdbx.Database, res: anytype) void {
     };
     defer db_key.deinit();
 
-    var raw = std.ArrayList(u8).init(allocator);
+    var raw = std.Io.Writer.Allocating.init(allocator);
     defer raw.deinit();
 
     database.save(
-        raw.writer(),
+        &raw.writer,
         db_key,
         allocator,
     ) catch |e| {
@@ -179,7 +179,7 @@ fn save(path: []const u8, database: *kdbx.Database, res: anytype) void {
     };
     defer file.close();
 
-    file.writeAll(raw.items) catch |e| {
+    file.writeAll(raw.written()) catch |e| {
         std.log.err("unable to write file '{s}' ({any})", .{ path, e });
         return;
     };
