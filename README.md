@@ -7,6 +7,8 @@ and other credentials.
 
 > Currently only KDBX4 is supported.
 
+> Gzip support is currently disabled when using `Database.save`. Gzip compression is automatically disabled for databases (see https://github.com/Zig-Sec/kdbx/issues/4). This has NO security implications but will slightly increase the database size.
+
 ## Getting Started
 
 First add this project as a dependency to your `build.zig.zon` file:
