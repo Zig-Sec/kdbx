@@ -44,14 +44,20 @@ pub const Body = struct {
             var raw_block_len: [4]u8 = undefined;
             std.mem.writeInt(u32, &raw_block_len, len, .little);
 
-            keys.checkMac(&mac, &.{ &raw_block_index, &raw_block_len, inner.written()[curr..] }, i) catch |e| {
+            keys.checkMac(
+                &mac,
+                &.{
+                    &raw_block_index,
+                    &raw_block_len,
+                    if (len > 0) inner.written()[curr..] else "",
+                },
+                i,
+            ) catch |e| {
                 std.log.err("unable to verify authenticity of block {d}", .{i});
                 return e;
             };
 
-            // Break if length is less than 1MiB
-            // TODO: check for ENDING
-            if (len < 1048576) break;
+            if (len == 0) break;
         }
 
         const iv = header.getEncryptionIv();
@@ -114,7 +120,7 @@ pub const Body = struct {
             &k,
         );
 
-        //std.debug.print("{s}\n", .{inner.items});
+        //std.debug.print("{s}\n", .{inner.written()[k..]});
 
         return @This(){
             .inner_header = inner_header,

@@ -260,10 +260,15 @@ pub const Header = struct {
         errdefer raw_header.deinit();
         try raw_header.writer.writeAll(&version.raw);
 
+        var count: usize = 0;
         var before: u8 = 0;
         while (true) {
-            const byte = try reader.takeByte();
+            const byte = reader.takeByte() catch |e| {
+                std.log.err("unable to read {d}'th byte for header ({any})", .{ count, e });
+                return e;
+            };
             try raw_header.writer.writeByte(byte);
+            count += 1;
 
             if (before == 0x0d and byte == 0x0a and raw_header.written().len >= 9) {
                 if (std.mem.eql(
@@ -341,6 +346,10 @@ pub const Header = struct {
 
     pub fn getCompression(self: *const @This()) Field.Compression {
         return self.fields[1].?.compression;
+    }
+
+    pub fn setCompression(self: *@This(), comp: Field.Compression) void {
+        self.fields[1].?.compression = comp;
     }
 
     pub fn getMainSeed(self: *const @This()) Field.MainSeed {

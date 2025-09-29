@@ -597,7 +597,7 @@ pub const Group = struct {
                 return error.GroupAlreadyExists;
         }
 
-        try self.groups.append(group);
+        try self.groups.append(self.allocator, group);
     }
 
     pub fn createGroup(self: *@This(), name: []const u8) !*@This() {

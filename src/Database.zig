@@ -221,6 +221,17 @@ pub fn new(options: NewDatabaseOptions) !@This() {
 /// * `db_key` - A composite key (usually just a password).
 /// * `allocator` - An `Allocator`.
 pub fn save(self: *@This(), out: *std.Io.Writer, db_key: DatabaseKey, allocator: Allocator) !void {
+    // TODO: remove this as soon as the gzip bug has been fixed.
+    if (self.header.getCompression() == .gzip) {
+        std.log.warn(
+            "unsupported compression method 'gzip' due to issue '{s}'",
+            .{"https://github.com/Zig-Sec/kdbx/issues/4"},
+        );
+        std.log.warn("falling back to no compression for the database", .{});
+        self.header.setCompression(.none);
+        std.log.warn("compression disabled for the given database. This has NO security implications!", .{});
+    }
+
     var keys = try self.header.deriveKeys(db_key);
     try self.header.updateRawHeader();
     self.header.updateHash();
@@ -251,9 +262,13 @@ pub fn save(self: *@This(), out: *std.Io.Writer, db_key: DatabaseKey, allocator:
         );
 
         try self.body.toXml(inner, &cipher);
+        try inner.flush();
 
         //std.debug.print("{s}\n", .{inner_.items});
 
+        // TODO: this block is more or less dead code as there is a
+        // block at the bottom of this function disabling gzip if it
+        // is enabled (see linked issue above).
         if (self.header.getCompression() == .gzip) {
             var in_stream = std.Io.Reader.fixed(inner_.written());
 
@@ -263,14 +278,17 @@ pub fn save(self: *@This(), out: *std.Io.Writer, db_key: DatabaseKey, allocator:
             try gzip.compress(
                 &in_stream,
                 &compressed.writer,
-                .{ .level = .level_6 },
+                //.{ .level = .level_6 },
+                .{},
             );
+
+            try compressed.writer.flush();
 
             inner_.deinit();
             inner_ = compressed;
         }
 
-        //std.debug.print("{s}\n", .{std.fmt.fmtSliceHexLower(inner_.items)});
+        //std.log.err("gzip compressed: {x}\n", .{inner_.written()});
 
         var inner_data = inner_.toArrayList();
         defer inner_data.deinit(allocator);
