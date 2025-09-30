@@ -907,6 +907,13 @@ pub const Entry = struct {
         try out.print("{d}", .{self.icon_id});
         try out.writeAll("</IconID>\n");
 
+        if (self.custom_icon_uuid) |icon_uuid| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<CustomIconUUID>");
+            try writeUuid(out, icon_uuid, self.allocator);
+            try out.writeAll("</CustomIconUUID>\n");
+        }
+
         // TODO
         for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
         try out.writeAll("<ForegroundColor/>\n");
@@ -1287,7 +1294,7 @@ fn parseIcon(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Icon 
     return .{
         .uuid = try fetchUuid(elem, "UUID", allocator),
         .last_modification_time = try fetchTimeTag(elem, "LastModificationTime", allocator),
-        .data = try fetchTagValue(elem, "Data", allocator),
+        .data = try fetchDataBase64(elem, "Data", allocator),
     };
 }
 
@@ -1737,6 +1744,18 @@ fn fetchUuid(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator:
     defer allocator.free(dnc);
     try std.base64.standard.Decoder.decode(dnc, time);
     return std.mem.readInt(Uuid.Uuid, dnc[0..16], .little);
+}
+
+fn fetchDataBase64(elem: dishwasher.parse.Tree.Node.Elem, name: []const u8, allocator: Allocator) ![]u8 {
+    const v = try fetchTagValue(elem, name, allocator);
+    defer allocator.free(v);
+
+    const l = try std.base64.standard.Decoder.calcSizeForSlice(v);
+    const v2 = try allocator.alloc(u8, l);
+    errdefer allocator.free(v2);
+    try std.base64.standard.Decoder.decode(v2, v);
+
+    return v2;
 }
 
 // ------------------------------ Serialize -------------------------------
