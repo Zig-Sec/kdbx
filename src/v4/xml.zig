@@ -372,7 +372,7 @@ pub const Binary = struct {
 
 pub const Icon = struct {
     uuid: Uuid.Uuid,
-    last_modification_time: i64,
+    last_modification_time: ?i64 = null,
     data: []u8,
 
     pub fn toXml(
@@ -389,10 +389,12 @@ pub const Icon = struct {
         try writeUuid(out, self.uuid, allocator);
         try out.writeAll("</UUID>\n");
 
-        for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
-        try out.writeAll("<LastModificationTime>");
-        try writeI64(out, self.last_modification_time, allocator);
-        try out.writeAll("</LastModificationTime>\n");
+        if (self.last_modification_time) |mod_time| {
+            for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
+            try out.writeAll("<LastModificationTime>");
+            try writeI64(out, mod_time, allocator);
+            try out.writeAll("</LastModificationTime>\n");
+        }
 
         for (0..(level + 1) * XML_INDENT) |_| try out.writeByte(' ');
         try out.writeAll("<Data>");
@@ -1293,7 +1295,7 @@ fn parseGroup(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator, ciphe
 fn parseIcon(elem: dishwasher.parse.Tree.Node.Elem, allocator: Allocator) !Icon {
     return .{
         .uuid = try fetchUuid(elem, "UUID", allocator),
-        .last_modification_time = try fetchTimeTag(elem, "LastModificationTime", allocator),
+        .last_modification_time = fetchTimeTag(elem, "LastModificationTime", allocator) catch null,
         .data = try fetchDataBase64(elem, "Data", allocator),
     };
 }
