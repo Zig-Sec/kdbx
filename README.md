@@ -50,7 +50,12 @@ const allocator = gpa.allocator();
 pub fn main() !void {
     var f = try std.fs.cwd().openFile("test.kdbx", .{});
     defer f.close();
-    var reader  = f.reader(&.{});
+    
+    // Please always use a buffer and NOT '&.{}' as there
+    // seems to be a bug with the reader interface when using
+    // no buffer.
+    var buffer: [1024]u8 = undefined;
+    var reader  = f.reader(&buffer);
 
     const db_key = kdbx.DatabaseKey{
         .password = try allocator.dupe(u8, "1234"),
@@ -58,7 +63,7 @@ pub fn main() !void {
     };
     defer db_key.deinit();
 
-    var database = try Database.open(&reader, .{
+    var database = try Database.open(&reader.interface, .{
         .allocator = allocator,
         .key = db_key,
     });
