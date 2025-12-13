@@ -5,13 +5,15 @@
 
 int main(int argc, char** argv) 
 {
-    char* path = "testdb.kdbx";
+    char* path = "c/tests/TestDb.kdbx";
     char* pw = "test123";
-
+    
+    int ret = 0;
     void* database;
-
-    if (kdbx_open_with_password(&database, path, strlen(path), pw, strlen(pw)) != 0) {
-        puts("error opening kdbx file");
+    
+    // First we open the database
+    if ((ret = kdbx_open_with_password(&database, path, strlen(path), pw, strlen(pw))) != 0) {
+        printf("error opening kdbx file (%d)\n", ret);
         exit(1);
     }
     
