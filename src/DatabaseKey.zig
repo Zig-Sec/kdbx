@@ -4,19 +4,19 @@ const Allocator = std.mem.Allocator;
 password: ?[]u8 = null,
 keyfile: ?[]u8 = null,
 keyprovider: ?[]u8 = null,
-allocator: Allocator,
+allocator: ?Allocator = null,
 
 pub fn deinit(self: *const @This()) void {
     if (self.password) |d| {
         std.crypto.secureZero(u8, d);
-        self.allocator.free(d);
+        if (self.allocator) |a| a.free(d);
     }
     if (self.keyfile) |d| {
         std.crypto.secureZero(u8, d);
-        self.allocator.free(d);
+        if (self.allocator) |a| a.free(d);
     }
     if (self.keyprovider) |d| {
         std.crypto.secureZero(u8, d);
-        self.allocator.free(d);
+        if (self.allocator) |a| a.free(d);
     }
 }

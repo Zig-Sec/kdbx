@@ -38,6 +38,13 @@ pub fn build(b: *std.Build) !void {
     });
     try b.modules.put(b.dupe("kdbx"), kdbx_module);
 
+    try buildCLib(
+        b,
+        target,
+        optimize,
+        kdbx_module,
+    );
+
     const kdbx_unit_tests = b.addTest(.{
         .root_module = kdbx_module,
     });
@@ -83,4 +90,65 @@ pub fn build(b: *std.Build) !void {
     const run_gzip_unit_tests = b.addRunArtifact(gzip_unit_tests);
     const gzip_test_step = b.step("test-gzip", "Run gzip unit tests");
     gzip_test_step.dependOn(&run_gzip_unit_tests.step);
+}
+
+fn buildCLib(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    kdbx_mod: *std.Build.Module,
+) !void {
+    const kdbx_lib = b.addLibrary(.{
+        .linkage = .static,
+        .name = "kdbx",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("c/bindings.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "kdbx", .module = kdbx_mod },
+            },
+        }),
+    });
+
+    kdbx_lib.linkLibC();
+
+    kdbx_lib.installHeader(b.path("c/kdbx.h"), "kdbx.h");
+
+    b.installArtifact(kdbx_lib);
+
+    // Add Tests/ Examples
+    const test1 = addCLibTest(b, target, optimize, kdbx_lib, "ctest1", "c/tests/ctest1.c");
+    const run_test1 = b.step("run-ctest1", "Run the ctest1 example");
+    run_test1.dependOn(&test1.step);
+}
+
+fn addCLibTest(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+    lib: *std.Build.Step.Compile,
+    exeName: []const u8,
+    sourceFile: []const u8,
+) *std.Build.Step.Run {
+    const exe_mod = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_mod.addCSourceFiles(.{
+        .files = &.{
+            sourceFile,
+        },
+        .flags = &.{},
+    });
+    exe_mod.linkLibrary(lib);
+
+    const exe = b.addExecutable(.{
+        .name = exeName,
+        .root_module = exe_mod,
+    });
+
+    b.installArtifact(exe);
+
+    return b.addRunArtifact(exe);
 }
