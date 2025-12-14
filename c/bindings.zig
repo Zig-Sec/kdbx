@@ -6,6 +6,10 @@ const EIO: c_int = 5; // Input/output error
 const ENOMEM: c_int = 12; // Cannot allocate memory
 const EACCES: c_int = 13; // Permission denied
 
+/// Open a KDBX database using a password.
+///
+/// On success, the function will populate db with a database instance and return 0.
+/// On error, a non-zero error value is returned.
 pub export fn kdbx_open_with_password(
     db: **anyopaque,
     path: [*c]u8,
@@ -50,6 +54,11 @@ pub export fn kdbx_open_with_password(
     return 0;
 }
 
+/// Close a KDBX database.
+///
+/// The passed database db must be valid.
+///
+/// The function will always return success (0).
 pub export fn kdbx_close(
     db: *anyopaque,
 ) c_int {
@@ -59,4 +68,62 @@ pub export fn kdbx_close(
     std.heap.c_allocator.destroy(db_);
 
     return 0;
+}
+
+/// Get the group specified by `path`.
+///
+/// On succuess, the function will assign the group specified by `path` to `group`.
+/// On error, a non-zero error value is returned.
+pub export fn kdbx_db_get_group(
+    group: **anyopaque,
+    db: *anyopaque,
+    path: [*c]u8,
+    path_len: usize,
+) c_int {
+    var db_: *kdbx.Database = @ptrCast(@alignCast(db));
+    const path_ = path[0..path_len];
+
+    const g = db_.getGroup(path_);
+    if (g == null) return ENOENT;
+
+    group.* = @ptrCast(g.?);
+    return 0;
+}
+
+/// Get the entry of the `group` that matches the `value` for the given `key`.
+///
+/// On success, the matching entry is assigned to `entry`.
+/// On error, a non-zero error value is returned.
+pub export fn kdbx_group_get_entry_by_key(
+    entry: **anyopaque,
+    group: *anyopaque,
+    key: [*c]u8,
+    key_len: usize,
+    value: [*c]u8,
+    value_len: usize,
+) c_int {
+    var group_: *kdbx.Group = @ptrCast(@alignCast(group));
+
+    const e = group_.getEntryByValue(key[0..key_len], value[0..value_len]);
+    if (e == null) return ENOENT;
+
+    entry.* = @ptrCast(e.?);
+    return 0;
+}
+
+pub export fn kdbx_entry_get_value(
+    entry: *anyopaque,
+    key: [*c]u8,
+    key_len: usize,
+) [*c]u8 {
+    var entry_: *kdbx.Entry = @ptrCast(@alignCast(entry));
+
+    const v = entry_.get(key[0..key_len]);
+    if (v == null) return ENOENT;
+
+    const cv = std.heap.c_allocator.dupeZ(u8, v.?) catch {
+        return ENOMEM;
+    };
+
+    return cv.ptr;
 }

@@ -1,4 +1,6 @@
 zig-out
 zig-cache
 .zig-cache
+
 *.swp
+.DS_Store
