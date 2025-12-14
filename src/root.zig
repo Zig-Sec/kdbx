@@ -12,6 +12,7 @@ pub const DatabaseKey = @import("DatabaseKey.zig");
 
 test {
     _ = pem;
+    _ = @import("tests.zig");
 }
 
 test "v4 tests" {

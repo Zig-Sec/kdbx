@@ -569,6 +569,18 @@ pub const Group = struct {
         return null;
     }
 
+    pub fn getEntryByValue(self: *@This(), key: []const u8, value: []const u8) ?*Entry {
+        for (0..self.entries.items.len) |i| {
+            if (self.entries.items[i].get(key)) |value_| {
+                if (std.mem.eql(u8, value, value_)) {
+                    return &self.entries.items[i];
+                }
+            }
+        }
+
+        return null;
+    }
+
     pub fn getGroupByName(self: *@This(), name: []const u8) ?*Group {
         for (0..self.groups.items.len) |i| {
             if (std.mem.eql(u8, self.groups.items[i].name, name)) {

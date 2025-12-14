@@ -378,3 +378,35 @@ pub fn save(self: *@This(), out: *std.Io.Writer, db_key: DatabaseKey, allocator:
         }
     }
 }
+
+/// Get the root group of the given database.
+pub fn getRoot(self: *@This()) *Group {
+    return &self.body.root;
+}
+
+/// Get the group specified by `path`.
+///
+/// The `path` must start with a '/' (the root) followed by zero
+/// or more group names, separated by a '/'.
+///
+/// Returns `null` if the group doesn't exist.
+pub fn getGroup(self: *@This(), path: []const u8) ?*Group {
+    // The path must start with a '/' (the root)
+    if (path.len < 1 or path[0] != '/') return null;
+
+    var g = self.getRoot();
+    if (path.len < 2) return g;
+
+    var iter = std.mem.splitAny(u8, path, "/");
+    _ = iter.next(); // We skip the first, as we start with the '/'
+    outer: while (iter.next()) |name| {
+        for (g.groups.items) |*child_group| {
+            if (std.mem.eql(u8, child_group.name, name)) {
+                g = child_group;
+                continue :outer;
+            }
+        } else return null;
+    }
+
+    return g;
+}
