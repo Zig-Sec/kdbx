@@ -6,6 +6,33 @@ const EIO: c_int = 5; // Input/output error
 const ENOMEM: c_int = 12; // Cannot allocate memory
 const EACCES: c_int = 13; // Permission denied
 
+fn kdbx_open_with_password_(
+    reader: *std.Io.Reader,
+    pw: []u8,
+    code: *c_int,
+) !*kdbx.Database {
+    const key = kdbx.DatabaseKey{
+        .password = pw,
+    };
+
+    var database = kdbx.Database.open(reader, .{
+        .allocator = std.heap.c_allocator,
+        .key = key,
+    }) catch {
+        code.* = EACCES;
+        return error.EACCES;
+    };
+    errdefer database.deinit();
+
+    const db_ = std.heap.c_allocator.create(kdbx.Database) catch {
+        code.* = ENOMEM;
+        return error.ENOMEM;
+    };
+    db_.* = database;
+
+    return db_;
+}
+
 /// Open a KDBX database using a password.
 ///
 /// On success, the function will populate db with a database instance and return 0.
@@ -19,9 +46,7 @@ pub export fn kdbx_open_with_password(
 ) c_int {
     const path_ = path[0..path_len];
     const password_ = password[0..password_len];
-
-    std.debug.print("{s}\n", .{path_});
-    std.debug.print("{s}\n", .{password_});
+    var ret: c_int = 0;
 
     var f = std.fs.cwd().openFile(
         path_,
@@ -34,24 +59,12 @@ pub export fn kdbx_open_with_password(
     var buffer: [1024]u8 = undefined;
     var reader = f.reader(&buffer);
 
-    const key = kdbx.DatabaseKey{
-        .password = password_,
+    const db_ = kdbx_open_with_password_(&reader.interface, password_, &ret) catch {
+        return ret;
     };
-
-    const database = kdbx.Database.open(&reader.interface, .{
-        .allocator = std.heap.c_allocator,
-        .key = key,
-    }) catch {
-        return EACCES;
-    };
-
-    const db_ = std.heap.c_allocator.create(kdbx.Database) catch {
-        return ENOMEM;
-    };
-    db_.* = database;
 
     db.* = @as(*anyopaque, @ptrCast(db_));
-    return 0;
+    return ret;
 }
 
 /// Close a KDBX database.
