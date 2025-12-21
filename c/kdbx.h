@@ -29,10 +29,25 @@ extern int kdbx_open_with_password(void** db, uint8_t* path, size_t pathLen, uin
  */
 extern int kdbx_close(void* db);
 
+/*
+ * Get the group specified by `path`.
+ *
+ * On success, the function will assign the group specified by `path` to `group`.
+ * On error, a non-zero error value is returned.
+ */
 extern int kdbx_db_get_group(void** group, void* db, uint8_t* path, size_t pathLen);
 
+/*
+ * Get the entry of the `group` that matches the `value` for the given `key`.
+ *
+ * On success, the matching entry is assigned to `entry`.
+ * On error, a non-zero error value is returned.
+ */
 extern int kdbx_group_get_entry_by_key(void** entry, void* group, uint8_t* key, size_t keyLen, uint8_t* value, size_t valueLen);
 
+/*
+ *
+ */
 extern uint8_t* kdbx_entry_get_value(void* entry, uint8_t* key, size_t keyLen);
 
 #ifdef __cplusplus

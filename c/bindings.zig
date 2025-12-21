@@ -124,6 +124,11 @@ pub export fn kdbx_group_get_entry_by_key(
     return 0;
 }
 
+/// Get the value for the specified `key`.
+///
+/// On success, the function will return the value as null-terminated string.
+/// The caller is responsible for freeing the string.
+/// On error, the function will return null.
 pub export fn kdbx_entry_get_value(
     entry: *anyopaque,
     key: [*c]u8,
@@ -132,10 +137,10 @@ pub export fn kdbx_entry_get_value(
     var entry_: *kdbx.Entry = @ptrCast(@alignCast(entry));
 
     const v = entry_.get(key[0..key_len]);
-    if (v == null) return ENOENT;
+    if (v == null) return null;
 
     const cv = std.heap.c_allocator.dupeZ(u8, v.?) catch {
-        return ENOMEM;
+        return null;
     };
 
     return cv.ptr;
