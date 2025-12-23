@@ -127,7 +127,9 @@ pub export fn kdbx_group_get_entry_by_key(
 /// Get the value for the specified `key`.
 ///
 /// On success, the function will return the value as null-terminated string.
+/// Depending on the type of data returned, it might be base64 encoded.
 /// The caller is responsible for freeing the string.
+///
 /// On error, the function will return null.
 pub export fn kdbx_entry_get_value(
     entry: *anyopaque,

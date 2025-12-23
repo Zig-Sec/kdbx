@@ -46,7 +46,13 @@ extern int kdbx_db_get_group(void** group, void* db, uint8_t* path, size_t pathL
 extern int kdbx_group_get_entry_by_key(void** entry, void* group, uint8_t* key, size_t keyLen, uint8_t* value, size_t valueLen);
 
 /*
+ * Get the value for the specified `key`.
  *
+ * On success, the function will return the value as null-terminated string.
+ * Depending on the type of data returned, it might be base64 encoded.
+ * The caller is responsible for freeing the string.
+ *
+ * On error, the function will return null.
  */
 extern uint8_t* kdbx_entry_get_value(void* entry, uint8_t* key, size_t keyLen);
 

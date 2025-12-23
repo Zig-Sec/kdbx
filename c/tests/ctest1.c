@@ -42,6 +42,16 @@ int main(int argc, char** argv)
     }
     printf("Title = '%s'\n", value);
     free(value);
+    value = NULL;
+
+    value = kdbx_entry_get_value(entry, "Password", strlen("Password"));
+    if (!value) { // Make sure you check for null!
+        printf("error accessing the password of '%s'\n", "Test Entry 2");
+        exit(1);
+    }
+    printf("Password = '%s'\n", value);
+    free(value);
+    value = NULL;
     
     kdbx_close(database);
     return 0;
